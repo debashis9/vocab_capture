@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Margin — vocabulary from your books</title>
+
+  <!-- PWA wiring: the manifest makes the app installable, theme-color paints the title bar -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#8A3033" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <!-- Type: Fraunces (characterful serif, used for the word specimen) + Inter (clean UI) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --paper:   #FBF9F4;  /* warm page */
+      --paper-2: #F3EFE6;  /* card / inset */
+      --ink:     #23201B;  /* near-black text */
+      --ink-soft:#6B6459;  /* muted labels */
+      --oxblood: #8A3033;  /* accent — fountain-pen wine */
+      --oxblood-soft: #f0e2e2;
+      --line:    #E3DDD0;  /* hairlines */
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Inter", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      padding: max(20px, env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom));
+    }
+
+    .wrap { max-width: 620px; margin: 0 auto; }
+
+    /* ---- Masthead ---- */
+    header { padding: 8px 0 22px; border-bottom: 1px solid var(--line); }
+    .brand {
+      font-family: "Fraunces", serif;
+      font-weight: 600;
+      font-size: 30px;
+      letter-spacing: -0.01em;
+      margin: 0;
+    }
+    .brand .dot { color: var(--oxblood); }
+    .tagline { margin: 4px 0 0; color: var(--ink-soft); font-size: 14px; }
+
+    /* ---- Book tag (bookplate) ---- */
+    .book-row { display: flex; align-items: center; gap: 10px; margin: 20px 0 14px; }
+    .book-row label {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--ink-soft); white-space: nowrap;
+    }
+    .book-row input {
+      flex: 1; min-width: 0;
+      background: transparent;
+      border: none; border-bottom: 1.5px dashed var(--line);
+      padding: 6px 2px; font: inherit; color: var(--ink);
+    }
+    .book-row input:focus { outline: none; border-bottom-color: var(--oxblood); }
+
+    /* ---- Lookup bar ---- */
+    .lookup { display: flex; gap: 10px; }
+    .lookup input {
+      flex: 1; min-width: 0;
+      font-family: "Fraunces", serif; font-size: 22px;
+      background: #fff;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 14px 16px; color: var(--ink);
+    }
+    .lookup input::placeholder { color: #B7AE9E; font-style: italic; }
+    .lookup input:focus { outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent; }
+
+    button {
+      font: inherit; font-weight: 600; cursor: pointer;
+      border: none; border-radius: var(--radius);
+      background: var(--oxblood); color: var(--paper);
+      padding: 0 20px;
+    }
+    button:hover { background: #75282b; }
+    button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+    button:disabled { opacity: .5; cursor: default; }
+
+    /* ---- States ---- */
+    .status { margin: 26px 2px; color: var(--ink-soft); font-size: 15px; }
+    .status.error { color: var(--oxblood); }
+
+    /* ---- Word specimen card ---- */
+    .card {
+      margin-top: 26px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 24px 24px 26px;
+      position: relative;
+      animation: rise .28s ease both;
+    }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+
+    .card::before {
+      content: ""; position: absolute; left: 24px; top: 0;
+      width: 44px; height: 3px; background: var(--oxblood);
+      border-radius: 0 0 3px 3px;
+    }
+    .headword {
+      font-family: "Fraunces", serif; font-weight: 600;
+      font-size: 34px; line-height: 1.1; margin: 6px 0 2px;
+    }
+    .pos { font-family: "Fraunces", serif; font-style: italic; color: var(--oxblood); font-size: 17px; }
+    .phon { color: var(--ink-soft); font-size: 14px; margin-left: 8px; }
+    .def { font-size: 17px; line-height: 1.55; margin: 16px 0 0; }
+    .example {
+      margin: 14px 0 0; padding-left: 14px;
+      border-left: 2px solid var(--oxblood-soft);
+      color: var(--ink-soft); font-style: italic; font-size: 15px;
+    }
+
+    .chips-label {
+      font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--ink-soft); margin: 20px 0 8px;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      background: var(--paper-2); border: 1px solid var(--line);
+      border-radius: 999px; padding: 5px 12px; font-size: 14px;
+    }
+    .chip.ant { background: var(--oxblood-soft); border-color: #e3cccc; }
+
+    .foot { margin-top: 30px; color: var(--ink-soft); font-size: 13px; text-align: center; }
+    .foot code { background: var(--paper-2); padding: 1px 6px; border-radius: 5px; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <h1 class="brand">Margin<span class="dot">.</span></h1>
+      <p class="tagline">Catch a word from whatever you're reading.</p>
+    </header>
+
+    <!-- Book this word came from. Value is remembered between sessions. -->
+    <div class="book-row">
+      <label for="book">Reading</label>
+      <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+    </div>
+
+    <!-- The lookup bar -->
+    <div class="lookup">
+      <input id="word" type="text" placeholder="type a word…" autocomplete="off"
+             autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+      <button id="go">Look up</button>
+    </div>
+
+    <!-- One of: idle hint / loading / error / the card -->
+    <div id="out">
+      <p class="status">Type a word above and press Enter.</p>
+    </div>
+
+    <p class="foot">
+      Lookups come from a free dictionary. Saving your words to a list is the next step —
+      see <code>README.md</code>.
+    </p>
+  </div>
+
+  <script>
+    // ---------- tiny helpers ----------
+    const $ = (id) => document.getElementById(id);
+    const out = $("out");
+
+    // Remember the current book between sessions (simple key/value, not the word list).
+    const BOOK_KEY = "margin.book";
+    $("book").value = localStorage.getItem(BOOK_KEY) || "";
+    $("book").addEventListener("input", (e) => localStorage.setItem(BOOK_KEY, e.target.value));
+
+    // ---------- lookup ----------
+    async function lookup(word) {
+      word = word.trim().toLowerCase();
+      if (!word) return;
+
+      out.innerHTML = `<p class="status">Looking up “${escapeHtml(word)}”…</p>`;
+      $("go").disabled = true;
+
+      try {
+        const res = await fetch(
+          "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)
+        );
+
+        if (res.status === 404) {
+          out.innerHTML = `<p class="status error">No entry found for “${escapeHtml(word)}”. Check the spelling, or try the base form of the word.</p>`;
+          return;
+        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+
+        const data = await res.json();
+        render(pickBest(word, data));
+      } catch (err) {
+        out.innerHTML = `<p class="status error">Couldn't reach the dictionary. Check your connection and try again.</p>`;
+      } finally {
+        $("go").disabled = false;
+      }
+    }
+
+    // Flatten the API's nested response into the fields we care about.
+    function pickBest(word, data) {
+      const entry = Array.isArray(data) ? data[0] : data;
+      const phonetic = entry.phonetic ||
+        (entry.phonetics || []).map(p => p.text).find(Boolean) || "";
+
+      const meaning = (entry.meanings || [])[0] || {};
+      const firstDef = (meaning.definitions || [])[0] || {};
+
+      // Gather synonyms/antonyms from both the meaning level and the definition level.
+      const syn = dedupe([...(meaning.synonyms||[]), ...(firstDef.synonyms||[])]).slice(0,6);
+      const ant = dedupe([...(meaning.antonyms||[]), ...(firstDef.antonyms||[])]).slice(0,6);
+
+      return {
+        word: entry.word || word,
+        phonetic,
+        pos: meaning.partOfSpeech || "",
+        definition: firstDef.definition || "No definition text was provided.",
+        example: firstDef.example || "",
+        synonyms: syn,
+        antonyms: ant,
+      };
+    }
+
+    function render(w) {
+      const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
+      out.innerHTML = `
+        <article class="card">
+          <div class="headword">${escapeHtml(w.word)}</div>
+          <span class="pos">${escapeHtml(w.pos)}</span>${
+            w.phonetic ? `<span class="phon">${escapeHtml(w.phonetic)}</span>` : ""
+          }
+          <p class="def">${escapeHtml(w.definition)}</p>
+          ${ w.example ? `<p class="example">“${escapeHtml(w.example)}”</p>` : "" }
+          ${ w.synonyms.length ? `<p class="chips-label">Synonyms</p>
+             <div class="chips">${w.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
+          ${ w.antonyms.length ? `<p class="chips-label">Antonyms</p>
+             <div class="chips">${w.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
+        </article>`;
+    }
+
+    function dedupe(arr){ return [...new Set(arr.filter(Boolean))]; }
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => (
+      {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+    // ---------- events ----------
+    $("go").addEventListener("click", () => lookup($("word").value));
+    $("word").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup($("word").value); });
+
+    // ---------- register the service worker (needed for install + offline shell) ----------
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
+</body>
+</html>
