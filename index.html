@@ -132,6 +132,12 @@
     }
     .pos { font-family: "Fraunces", serif; font-style: italic; color: var(--oxblood); font-size: 17px; }
     .phon { color: var(--ink-soft); font-size: 14px; margin-left: 8px; }
+    .btn-audio {
+      background: none; border: none; color: var(--ink-soft);
+      padding: 2px; margin-left: 4px; vertical-align: -3px;
+      display: inline-flex; border-radius: 6px;
+    }
+    .btn-audio:hover { color: var(--oxblood); background: var(--oxblood-soft); }
     .def { font-size: 17px; line-height: 1.55; margin: 16px 0 0; }
     .example {
       margin: 14px 0 0; padding-left: 14px;
@@ -172,19 +178,29 @@
       border-radius: 8px; padding: 6px 10px;
     }
     .saved-empty { color: var(--ink-soft); font-size: 14px; }
-    .saved-item {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 14px 2px; border-bottom: 1px solid var(--line);
+    .saved-entry { border-bottom: 1px solid var(--line); }
+    .saved-entry:last-child { border-bottom: none; }
+    .saved-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .saved-row {
+      flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+      background: none; border: none; text-align: left; font: inherit; color: inherit;
+      padding: 14px 2px; border-radius: 8px;
     }
-    .saved-item:last-child { border-bottom: none; }
+    .saved-row:hover { background: var(--paper-2); }
     .saved-word-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .saved-word { font-family: "Fraunces", serif; font-weight: 600; font-size: 17px; }
     .saved-meta { color: var(--ink-soft); font-size: 13px; }
+    .saved-caret { color: var(--ink-soft); font-size: 12px; }
     .saved-delete {
       background: transparent; color: var(--ink-soft); font-weight: 500; font-size: 13px;
-      border: none; padding: 6px 10px; border-radius: 8px;
+      border: none; padding: 6px 10px; border-radius: 8px; flex: 0 0 auto;
     }
     .saved-delete:hover { color: var(--oxblood); background: var(--oxblood-soft); }
+    .saved-detail { padding: 0 2px 18px; }
+    .saved-detail .pos { font-size: 15px; }
+    .saved-detail .def { font-size: 15px; margin-top: 8px; }
+    .saved-detail .example { font-size: 14px; }
+    .saved-detail .chips-label { margin: 14px 0 6px; }
   </style>
 </head>
 
@@ -267,31 +283,56 @@
     }
 
     // entry: { word, meaning, partOfSpeech, synonyms, antonyms, example, book, source }
-    // id and savedAt are assigned here. Returns the stored record.
+    // One entry per word (case-insensitive). Saving a word already on the list merges
+    // into the existing record instead of duplicating it: the book is added to that
+    // entry's book list (skipped if it's already there), and the meaning/timestamp refresh.
     async function saveEntry(entry) {
-      const record = {
-        ...entry,
-        id: crypto.randomUUID(),
-        savedAt: new Date().toISOString(),
-      };
       const db = await openDB();
+      const wordKey = entry.word.trim().toLowerCase();
+      const book = (entry.book || "").trim();
+
       return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, "readwrite");
-        tx.objectStore(STORE).add(record);
-        tx.oncomplete = () => resolve(record);
+        const store = tx.objectStore(STORE);
+        const getAllReq = store.getAll();
+
+        getAllReq.onsuccess = () => {
+          const existing = getAllReq.result.find(
+            (e) => e.word.trim().toLowerCase() === wordKey
+          );
+          const savedAt = new Date().toISOString();
+          let record;
+
+          if (existing) {
+            const books = existing.book ? existing.book.split(",").map((b) => b.trim()).filter(Boolean) : [];
+            if (book && !books.includes(book)) books.push(book);
+            record = { ...existing, ...entry, book: books.join(", "), savedAt };
+          } else {
+            record = { ...entry, id: crypto.randomUUID(), savedAt };
+          }
+          store.put(record);
+          tx.oncomplete = () => resolve(record);
+        };
+        getAllReq.onerror = () => reject(getAllReq.error);
         tx.onerror = () => reject(tx.error);
       });
     }
 
-    // Returns entries newest-first, optionally filtered to one book.
+    // Returns entries newest-first, optionally filtered to one book (a book name
+    // is checked for membership in the entry's comma-separated book list).
     async function getEntries({ book } = {}) {
       const db = await openDB();
       return new Promise((resolve, reject) => {
-        const store = db.transaction(STORE, "readonly").objectStore(STORE);
-        const req = book ? store.index("book").getAll(book) : store.getAll();
-        req.onsuccess = () => resolve(
-          req.result.sort((a, b) => b.savedAt.localeCompare(a.savedAt))
-        );
+        const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
+        req.onsuccess = () => {
+          let results = req.result;
+          if (book) {
+            results = results.filter((e) =>
+              (e.book || "").split(",").map((b) => b.trim()).includes(book)
+            );
+          }
+          resolve(results.sort((a, b) => b.savedAt.localeCompare(a.savedAt)));
+        };
         req.onerror = () => reject(req.error);
       });
     }
@@ -337,8 +378,14 @@
     // Flatten the API's nested response into the fields we care about.
     function pickBest(word, data) {
       const entry = Array.isArray(data) ? data[0] : data;
-      const phonetic = entry.phonetic ||
-        (entry.phonetics || []).map(p => p.text).find(Boolean) || "";
+      // Wiktionary sometimes gives a shortened shared-prefix phonetic ending in "-/"
+      // (e.g. "/ɪkˈsæs-/" for "exacerbate") — skip those in favor of a complete one.
+      const phoneticCandidates = dedupe([
+        entry.phonetic, ...(entry.phonetics || []).map(p => p.text)
+      ]);
+      const phonetic = phoneticCandidates.find(p => !p.endsWith("-/")) ||
+        phoneticCandidates.find(Boolean) || "";
+      const audio = (entry.phonetics || []).map(p => p.audio).find(Boolean) || "";
 
       const meaning = (entry.meanings || [])[0] || {};
       const firstDef = (meaning.definitions || [])[0] || {};
@@ -350,6 +397,7 @@
       return {
         word: entry.word || word,
         phonetic,
+        audio,
         pos: meaning.partOfSpeech || "",
         definition: firstDef.definition || "No definition text was provided.",
         example: firstDef.example || "",
@@ -369,6 +417,13 @@
           <div class="headword">${escapeHtml(w.word)}</div>
           <span class="pos">${escapeHtml(w.pos)}</span>${
             w.phonetic ? `<span class="phon">${escapeHtml(w.phonetic)}</span>` : ""
+          }${
+            w.audio ? `<button type="button" class="btn-audio" data-audio="${escapeHtml(w.audio)}" aria-label="Play pronunciation">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+            </button>` : ""
           }
           <p class="def">${escapeHtml(w.definition)}</p>
           ${ w.example ? `<p class="example">“${escapeHtml(w.example)}”</p>` : "" }
@@ -420,13 +475,17 @@
     async function refreshSavedList() {
       const entries = await getEntries();
       populateBookFilter(entries);
-      const shown = bookFilter ? entries.filter(e => e.book === bookFilter) : entries;
+      const shown = bookFilter
+        ? entries.filter(e => (e.book || "").split(",").map(b => b.trim()).includes(bookFilter))
+        : entries;
       renderSavedList(shown);
     }
 
     function populateBookFilter(entries) {
       const select = $("book-filter");
-      const books = dedupe(entries.map(e => e.book)).sort();
+      const books = dedupe(
+        entries.flatMap(e => (e.book || "").split(",").map(b => b.trim()))
+      ).sort();
       select.innerHTML = `<option value="">All books</option>` +
         books.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join("");
       // Fall back to "All books" if the selected book no longer has any entries.
@@ -434,21 +493,43 @@
       select.value = bookFilter;
     }
 
+    // Ids of saved entries currently expanded to show their full meaning.
+    const expandedIds = new Set();
+
     function renderSavedList(entries) {
       const list = $("saved-list");
       if (!entries.length) {
         list.innerHTML = `<p class="saved-empty">No saved words yet.</p>`;
         return;
       }
-      list.innerHTML = entries.map(e => `
-        <div class="saved-item">
-          <div class="saved-word-line">
-            <span class="saved-word">${escapeHtml(e.word)}</span>
-            <span class="saved-meta">${escapeHtml(e.book || "—")} · ${formatDate(e.savedAt)}</span>
+      const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
+      list.innerHTML = entries.map(e => {
+        const open = expandedIds.has(e.id);
+        return `
+        <div class="saved-entry">
+          <div class="saved-item">
+            <button type="button" class="saved-row" data-id="${e.id}" aria-expanded="${open}">
+              <span class="saved-word-line">
+                <span class="saved-word">${escapeHtml(e.word)}</span>
+                <span class="saved-meta">${escapeHtml(e.book || "—")} · ${formatDate(e.savedAt)}</span>
+              </span>
+              <span class="saved-caret">${open ? "▾" : "▸"}</span>
+            </button>
+            <button class="saved-delete" type="button" data-id="${e.id}">Delete</button>
           </div>
-          <button class="saved-delete" type="button" data-id="${e.id}">Delete</button>
+          ${ open ? `
+            <div class="saved-detail">
+              ${ e.partOfSpeech ? `<span class="pos">${escapeHtml(e.partOfSpeech)}</span>` : "" }
+              <p class="def">${escapeHtml(e.meaning)}</p>
+              ${ e.example ? `<p class="example">“${escapeHtml(e.example)}”</p>` : "" }
+              ${ (e.synonyms||[]).length ? `<p class="chips-label">Synonyms</p>
+                 <div class="chips">${e.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
+              ${ (e.antonyms||[]).length ? `<p class="chips-label">Antonyms</p>
+                 <div class="chips">${e.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
+            </div>` : "" }
         </div>
-      `).join("");
+      `;
+      }).join("");
     }
 
     function formatDate(iso) {
@@ -498,7 +579,11 @@
     // ---------- events ----------
     $("go").addEventListener("click", () => lookup($("word").value));
     $("word").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup($("word").value); });
-    out.addEventListener("click", (e) => { if (e.target.id === "save") saveCurrentResult(); });
+    out.addEventListener("click", (e) => {
+      if (e.target.id === "save") saveCurrentResult();
+      const audioBtn = e.target.closest(".btn-audio");
+      if (audioBtn) new Audio(audioBtn.dataset.audio).play();
+    });
 
     $("book-filter").addEventListener("change", (e) => {
       bookFilter = e.target.value;
@@ -506,10 +591,19 @@
     });
 
     $("saved-list").addEventListener("click", async (e) => {
-      const btn = e.target.closest(".saved-delete");
-      if (!btn) return;
-      await deleteEntry(btn.dataset.id);
-      refreshSavedList();
+      const del = e.target.closest(".saved-delete");
+      if (del) {
+        expandedIds.delete(del.dataset.id);
+        await deleteEntry(del.dataset.id);
+        refreshSavedList();
+        return;
+      }
+      const row = e.target.closest(".saved-row");
+      if (row) {
+        const id = row.dataset.id;
+        expandedIds.has(id) ? expandedIds.delete(id) : expandedIds.add(id);
+        renderSavedList(await getEntries(bookFilter ? { book: bookFilter } : undefined));
+      }
     });
 
     refreshSavedList();
