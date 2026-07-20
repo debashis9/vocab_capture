@@ -89,6 +89,21 @@
     button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
     button:disabled { opacity: .5; cursor: default; }
 
+    .btn-mic {
+      flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line);
+      padding: 0 14px;
+    }
+    .btn-mic:hover { color: var(--oxblood); border-color: var(--oxblood); }
+    .btn-mic.listening {
+      color: var(--oxblood); border-color: var(--oxblood); background: var(--oxblood-soft);
+      animation: pulse 1.1s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    @media (prefers-reduced-motion: reduce) { .btn-mic.listening { animation: none; } }
+
     /* ---- States ---- */
     .status { margin: 26px 2px; color: var(--ink-soft); font-size: 15px; }
     .status.error { color: var(--oxblood); }
@@ -135,8 +150,41 @@
     }
     .chip.ant { background: var(--oxblood-soft); border-color: #e3cccc; }
 
+    .save-row { margin-top: 22px; text-align: right; }
+    .btn-save {
+      background: transparent; color: var(--oxblood);
+      border: 1.5px solid var(--oxblood);
+      padding: 10px 18px;
+    }
+    .btn-save:hover { background: var(--oxblood-soft); }
+    .btn-save.saved { border-color: var(--line); color: var(--ink-soft); }
+
     .foot { margin-top: 30px; color: var(--ink-soft); font-size: 13px; text-align: center; }
     .foot code { background: var(--paper-2); padding: 1px 6px; border-radius: 5px; }
+
+    /* ---- Saved list ---- */
+    .saved-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
+    .saved-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .saved-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 20px; margin: 0; }
+    .book-filter {
+      font: inherit; font-size: 13px; color: var(--ink-soft);
+      background: var(--paper-2); border: 1px solid var(--line);
+      border-radius: 8px; padding: 6px 10px;
+    }
+    .saved-empty { color: var(--ink-soft); font-size: 14px; }
+    .saved-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 2px; border-bottom: 1px solid var(--line);
+    }
+    .saved-item:last-child { border-bottom: none; }
+    .saved-word-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .saved-word { font-family: "Fraunces", serif; font-weight: 600; font-size: 17px; }
+    .saved-meta { color: var(--ink-soft); font-size: 13px; }
+    .saved-delete {
+      background: transparent; color: var(--ink-soft); font-weight: 500; font-size: 13px;
+      border: none; padding: 6px 10px; border-radius: 8px;
+    }
+    .saved-delete:hover { color: var(--oxblood); background: var(--oxblood-soft); }
   </style>
 </head>
 
@@ -157,6 +205,13 @@
     <div class="lookup">
       <input id="word" type="text" placeholder="type a word…" autocomplete="off"
              autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+      <button id="mic" type="button" class="btn-mic" aria-label="Speak a word" title="Speak a word">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+          <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+          <line x1="12" y1="18" x2="12" y2="22"/>
+        </svg>
+      </button>
       <button id="go">Look up</button>
     </div>
 
@@ -166,9 +221,19 @@
     </div>
 
     <p class="foot">
-      Lookups come from a free dictionary. Saving your words to a list is the next step —
-      see <code>README.md</code>.
+      Lookups come from a free dictionary. Saved words live on this device only, for now.
     </p>
+
+    <!-- Saved list: loads on open, filterable by book, each entry deletable. -->
+    <section class="saved-section">
+      <div class="saved-header">
+        <h2 class="saved-title">Saved words</h2>
+        <select id="book-filter" class="book-filter">
+          <option value="">All books</option>
+        </select>
+      </div>
+      <div id="saved-list"></div>
+    </section>
   </div>
 
   <script>
@@ -180,6 +245,66 @@
     const BOOK_KEY = "margin.book";
     $("book").value = localStorage.getItem(BOOK_KEY) || "";
     $("book").addEventListener("input", (e) => localStorage.setItem(BOOK_KEY, e.target.value));
+
+    // ---------- storage (IndexedDB) ----------
+    // The only part of the app allowed to touch IndexedDB. Everything else calls
+    // saveEntry / getEntries / deleteEntry and doesn't know or care how they're stored —
+    // that's what lets us swap in a cloud database later without touching the UI.
+    const DB_NAME = "margin";
+    const DB_VERSION = 1;
+    const STORE = "entries";
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = () => {
+          const store = req.result.createObjectStore(STORE, { keyPath: "id" });
+          store.createIndex("book", "book", { unique: false });
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    // entry: { word, meaning, partOfSpeech, synonyms, antonyms, example, book, source }
+    // id and savedAt are assigned here. Returns the stored record.
+    async function saveEntry(entry) {
+      const record = {
+        ...entry,
+        id: crypto.randomUUID(),
+        savedAt: new Date().toISOString(),
+      };
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.objectStore(STORE).add(record);
+        tx.oncomplete = () => resolve(record);
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    // Returns entries newest-first, optionally filtered to one book.
+    async function getEntries({ book } = {}) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const store = db.transaction(STORE, "readonly").objectStore(STORE);
+        const req = book ? store.index("book").getAll(book) : store.getAll();
+        req.onsuccess = () => resolve(
+          req.result.sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+        );
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function deleteEntry(id) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.objectStore(STORE).delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
 
     // ---------- lookup ----------
     async function lookup(word) {
@@ -233,7 +358,11 @@
       };
     }
 
+    // The word currently on screen, so the save button knows what to store.
+    let currentResult = null;
+
     function render(w) {
+      currentResult = w;
       const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
       out.innerHTML = `
         <article class="card">
@@ -247,16 +376,143 @@
              <div class="chips">${w.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
           ${ w.antonyms.length ? `<p class="chips-label">Antonyms</p>
              <div class="chips">${w.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
+          <div class="save-row">
+            <button id="save" class="btn-save" type="button">Save to list</button>
+          </div>
         </article>`;
+    }
+
+    // Saves the word currently shown in the card, tagged to the "Reading" field.
+    async function saveCurrentResult() {
+      const btn = $("save");
+      if (!currentResult || btn.disabled) return;
+
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      try {
+        await saveEntry({
+          word: currentResult.word,
+          meaning: currentResult.definition,
+          partOfSpeech: currentResult.pos,
+          synonyms: currentResult.synonyms,
+          antonyms: currentResult.antonyms,
+          example: currentResult.example,
+          book: $("book").value.trim(),
+          source: "typed",
+        });
+        btn.textContent = "Saved ✓";
+        btn.classList.add("saved");
+        refreshSavedList();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Save to list";
+      }
     }
 
     function dedupe(arr){ return [...new Set(arr.filter(Boolean))]; }
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => (
       {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
+    // ---------- saved list ----------
+    let bookFilter = "";
+
+    // Re-reads everything from storage and redraws the filter dropdown + the list.
+    async function refreshSavedList() {
+      const entries = await getEntries();
+      populateBookFilter(entries);
+      const shown = bookFilter ? entries.filter(e => e.book === bookFilter) : entries;
+      renderSavedList(shown);
+    }
+
+    function populateBookFilter(entries) {
+      const select = $("book-filter");
+      const books = dedupe(entries.map(e => e.book)).sort();
+      select.innerHTML = `<option value="">All books</option>` +
+        books.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join("");
+      // Fall back to "All books" if the selected book no longer has any entries.
+      bookFilter = books.includes(bookFilter) ? bookFilter : "";
+      select.value = bookFilter;
+    }
+
+    function renderSavedList(entries) {
+      const list = $("saved-list");
+      if (!entries.length) {
+        list.innerHTML = `<p class="saved-empty">No saved words yet.</p>`;
+        return;
+      }
+      list.innerHTML = entries.map(e => `
+        <div class="saved-item">
+          <div class="saved-word-line">
+            <span class="saved-word">${escapeHtml(e.word)}</span>
+            <span class="saved-meta">${escapeHtml(e.book || "—")} · ${formatDate(e.savedAt)}</span>
+          </div>
+          <button class="saved-delete" type="button" data-id="${e.id}">Delete</button>
+        </div>
+      `).join("");
+    }
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    }
+
+    // ---------- voice input ----------
+    // Fills the word field only — it never triggers the lookup itself. You review
+    // (and fix, if it misheard) before pressing Look up or Enter, same as typing.
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      const mic = $("mic");
+      let listening = false;
+
+      const stopListening = () => {
+        listening = false;
+        mic.classList.remove("listening");
+        mic.setAttribute("aria-label", "Speak a word");
+      };
+
+      recognition.addEventListener("result", (e) => {
+        // Chrome tacks sentence punctuation onto single-word results (e.g. "incessant.") — strip it.
+        $("word").value = e.results[0][0].transcript.trim().replace(/[.,!?;:]+$/, "");
+        $("word").focus();
+      });
+      recognition.addEventListener("end", stopListening);
+      recognition.addEventListener("error", stopListening);
+
+      mic.addEventListener("click", () => {
+        if (listening) { recognition.stop(); return; }
+        listening = true;
+        mic.classList.add("listening");
+        mic.setAttribute("aria-label", "Listening… tap to stop");
+        recognition.start();
+      });
+    } else {
+      // Not supported in this browser (e.g. Firefox) — typing still works fine.
+      $("mic").remove();
+    }
+
     // ---------- events ----------
     $("go").addEventListener("click", () => lookup($("word").value));
     $("word").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup($("word").value); });
+    out.addEventListener("click", (e) => { if (e.target.id === "save") saveCurrentResult(); });
+
+    $("book-filter").addEventListener("change", (e) => {
+      bookFilter = e.target.value;
+      refreshSavedList();
+    });
+
+    $("saved-list").addEventListener("click", async (e) => {
+      const btn = e.target.closest(".saved-delete");
+      if (!btn) return;
+      await deleteEntry(btn.dataset.id);
+      refreshSavedList();
+    });
+
+    refreshSavedList();
 
     // ---------- register the service worker (needed for install + offline shell) ----------
     if ("serviceWorker" in navigator) {

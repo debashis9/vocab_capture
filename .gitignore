@@ -1,0 +1,48 @@
+# --- Secrets & environment (CRITICAL — never commit these) ---
+# Matters most from Phase 3, when the serverless proxy holds your API key.
+.env
+.env.*
+*.local
+secrets.json
+*.key
+*.pem
+
+# --- Node / tooling (for the proxy or any build step later) ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.pnpm-debug.log*
+
+# --- Serverless / hosting local artifacts (Phase 3+) ---
+.vercel/
+.netlify/
+.wrangler/
+.cloudflare/
+functions/**/node_modules/
+
+# --- Editor / OS noise ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local session files (keep project-shared config, ignore local state) ---
+# CLAUDE.md is intentionally NOT ignored — it's shared project context you WANT in the repo.
+.claude/settings.local.json
+.claude/.credentials.json
+
+# --- Build output (only if you ever add a build step; harmless now) ---
+dist/
+build/
+.cache/
+
+# --- Logs & temp ---
+*.log
+tmp/
+temp/
