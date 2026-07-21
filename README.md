@@ -1,6 +1,11 @@
 # vocab_capture
 # Margin — build runbook
 
+> **Testing this with family/friends?** Send them [`guide.html`](guide.html) instead of this
+> file — it's the plain-language install guide with honest disclaimers, live at
+> [debashis9.github.io/vocab_capture/guide.html](https://debashis9.github.io/vocab_capture/guide.html).
+> This README is the developer-facing build log.
+
 Your standalone vocabulary app. This folder now covers **Milestones M0–M3 and M5** from the
 project plan: an installable app (M0) that looks up a typed word from a free dictionary and
 shows it as a card (M1), saves it locally with a filterable/deletable list (M2), accepts
