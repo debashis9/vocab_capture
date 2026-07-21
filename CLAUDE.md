@@ -17,6 +17,12 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   intentionally left off (`AI_ENABLED = false`) — activation is deferred until there's a
   revenue-backed plan for the ongoing API cost, since it's billed separately from any
   Claude.ai subscription.
+- **Phase 4 (flashcards + quiz) is DONE.** A "Practice" button on the saved-words list opens
+  a session scoped to whatever book is currently filtered. Flashcards show one word at a
+  time (tap to flip and reveal the meaning); quiz is multiple-choice, with the 3 wrong
+  answers drawn from your other saved words' real definitions (preferring the same part of
+  speech so they're not trivially guessable) — no AI, no network call, works entirely off
+  what's already in IndexedDB. Needs 1+ saved word for flashcards, 4+ for quiz.
 - Live and installed on Windows and Android; hosted via GitHub Pages.
 
 ## Architecture (hold to these)
@@ -48,6 +54,9 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   Decision: hold off until scaling to a wider audience with a revenue model in place, then
   flip the flag and deploy the Worker. See `worker/README.md` for activation steps.
 - M5: polish (offline-aware error message, install prompt, dark theme). DONE.
+- **Phase 4: flashcards + quiz, scoped to the current book filter. DONE** (see Current state
+  above for details). Client-side only — no auth needed, which is why this went ahead of
+  Phase 2 (cloud sync, still not started).
 
 ## Working style
 Explain changes in plain terms — I'm learning. Prefer small, reviewable steps over large
