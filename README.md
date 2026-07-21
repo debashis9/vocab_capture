@@ -113,12 +113,18 @@ swap instead of a rewrite.
 - [x] **M1** — typed lookup + result card (free dictionary API)
 - [x] **M2** — save to IndexedDB, list + filter by book + delete
 - [x] **M3** — voice input (mic button)
-- [ ] **M4** — optional LLM upgrade (better definitions; needs the API + a proxy)  ← *do this next*
+- [x] **M4** — built (Cloudflare Worker + Claude Haiku 4.5), but feature-flagged off pending
+  a revenue-backed billing decision — see `worker/README.md`
 - [x] **M5** — polish: offline-aware error message, in-app install button, dark theme
+- [x] **Phase 4** — flashcards + quiz, scoped to the current book filter, no auth needed
 
 Beyond the original M2/M3 spec, also shipped: pronunciation audio playback on the result
-card and saved list, and same-word dedup (saving a word you've already saved merges the new
-book into that entry instead of creating a duplicate).
+card and saved list, same-word dedup (saving a word you've already saved merges the new
+book into that entry instead of creating a duplicate), a clear-text button on the word
+field, and a light/dark/system theme toggle.
+
+**Not started:** Phase 2 (cloud sync — saved words currently live only on the device that
+saved them, per the limit below).
 
 ## Known Phase-1 limits (all expected)
 

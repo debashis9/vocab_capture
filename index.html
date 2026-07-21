@@ -26,6 +26,8 @@
       --oxblood-soft: #f0e2e2;
       --on-oxblood: #FBF9F4;  /* text/icons on an oxblood background — stays light in both themes */
       --oxblood-hover: #75282b;
+      --good: #4A7A4F;       /* quiz: correct answer */
+      --good-soft: #E6EDE3;
       --line:    #E3DDD0;  /* hairlines */
       --radius: 14px;
     }
@@ -42,6 +44,8 @@
         --oxblood: #C1585B;
         --oxblood-soft: #3A2224;
         --oxblood-hover: #A6474A;
+        --good: #7CAA7E;
+        --good-soft: #26332A;
         --line:    #3A342C;
       }
     }
@@ -55,6 +59,8 @@
       --oxblood: #C1585B;
       --oxblood-soft: #3A2224;
       --oxblood-hover: #A6474A;
+      --good: #7CAA7E;
+      --good-soft: #26332A;
       --line:    #3A342C;
     }
 
@@ -104,6 +110,7 @@
 
     /* ---- Book tag (bookplate) ---- */
     .book-row { display: flex; align-items: center; gap: 10px; margin: 20px 0 14px; }
+    .book-row[hidden] { display: none; }
     .book-row label {
       font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
       color: var(--ink-soft); white-space: nowrap;
@@ -118,6 +125,7 @@
 
     /* ---- Lookup bar ---- */
     .lookup { display: flex; gap: 10px; }
+    .lookup[hidden] { display: none; }
     .word-field { position: relative; flex: 1; min-width: 0; }
     .word-field input {
       width: 100%;
@@ -245,11 +253,20 @@
     .saved-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
     .saved-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
     .saved-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 20px; margin: 0; }
+    .saved-header-actions { display: flex; align-items: center; gap: 8px; }
     .book-filter {
       font: inherit; font-size: 13px; color: var(--ink-soft);
       background: var(--paper-2); border: 1px solid var(--line);
       border-radius: 8px; padding: 6px 10px;
     }
+    .btn-practice {
+      font-size: 13px;
+      background: transparent; color: var(--oxblood);
+      border: 1.5px solid var(--oxblood);
+      padding: 7px 14px;
+    }
+    .btn-practice:hover { background: var(--oxblood-soft); }
+    .btn-practice[hidden] { display: none; } /* no saved words at all yet */
     .saved-empty { color: var(--ink-soft); font-size: 14px; }
     .saved-entry { border-bottom: 1px solid var(--line); }
     .saved-entry:last-child { border-bottom: none; }
@@ -274,6 +291,58 @@
     .saved-detail .def { font-size: 15px; margin-top: 8px; }
     .saved-detail .example { font-size: 14px; }
     .saved-detail .chips-label { margin: 14px 0 6px; }
+
+    /* ---- Practice (flashcards + quiz) ---- */
+    .practice-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
+    .practice-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .practice-progress { color: var(--ink-soft); font-size: 13px; margin: 0; font-variant-numeric: tabular-nums; }
+    .btn-practice-close {
+      flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; padding: 0;
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line); border-radius: 999px;
+    }
+    .btn-practice-close:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
+
+    .practice-lede { color: var(--ink-soft); font-size: 14px; margin: 0 0 18px; }
+    .practice-hint { color: var(--ink-soft); font-size: 13px; font-style: italic; margin: 12px 0 0; }
+    .practice-mode-buttons { display: flex; gap: 10px; }
+    .practice-mode-buttons button { flex: 1; padding: 16px 12px; }
+
+    .flashcard { cursor: pointer; min-height: 130px; }
+    .flashcard-hint { margin: 20px 0 0; color: var(--ink-soft); font-style: italic; font-size: 14px; }
+
+    .quiz-prompt { color: var(--ink-soft); font-size: 14px; margin: 20px 0 10px; }
+    .quiz-choices { display: flex; flex-direction: column; gap: 8px; }
+    .quiz-choice {
+      display: block; width: 100%; text-align: left;
+      background: var(--paper-2); color: var(--ink);
+      font-weight: 500;
+      border: 1.5px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .quiz-choice:hover:not(:disabled) { background: var(--paper-2); border-color: var(--oxblood); }
+    .quiz-choice.correct { background: var(--good-soft); border-color: var(--good); color: var(--good); }
+    .quiz-choice.incorrect { background: var(--oxblood-soft); border-color: var(--oxblood); color: var(--oxblood); }
+    .quiz-choice:disabled { opacity: 1; cursor: default; }
+
+    .practice-nav { margin-top: 22px; display: flex; justify-content: flex-end; gap: 10px; }
+    .btn-practice-nav {
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line);
+      padding: 10px 18px;
+    }
+    .btn-practice-nav:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
+    .btn-practice-nav:disabled { opacity: .35; }
+
+    .practice-done { text-align: center; padding: 20px 0; }
+    .practice-done-title {
+      font-family: "Fraunces", serif; font-weight: 600; font-size: 24px;
+      margin: 0 0 20px;
+    }
+    .practice-done .practice-nav { justify-content: center; }
   </style>
 </head>
 
@@ -327,11 +396,19 @@
     <section class="saved-section">
       <div class="saved-header">
         <h2 class="saved-title">Saved words</h2>
-        <select id="book-filter" class="book-filter">
-          <option value="">All books</option>
-        </select>
+        <div class="saved-header-actions">
+          <select id="book-filter" class="book-filter">
+            <option value="">All books</option>
+          </select>
+          <button id="practice-open" type="button" class="btn-practice" hidden>Practice</button>
+        </div>
       </div>
       <div id="saved-list"></div>
+    </section>
+
+    <!-- Flashcards + quiz, scoped to whatever the book filter above is set to. -->
+    <section id="practice-section" class="practice-section" hidden>
+      <div id="practice-body"></div>
     </section>
   </div>
 
@@ -655,6 +732,7 @@
       // Fall back to "All books" if the selected book no longer has any entries.
       bookFilter = books.includes(bookFilter) ? bookFilter : "";
       select.value = bookFilter;
+      $("practice-open").hidden = entries.length === 0;
     }
 
     // Ids of saved entries currently expanded to show their full meaning.
@@ -699,6 +777,231 @@
     function formatDate(iso) {
       return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     }
+
+    // ---------- practice (flashcards + quiz) ----------
+    // Scoped to whatever book the "Saved words" filter is currently set to —
+    // there's no separate selector here, it just reuses that choice.
+    let practiceMode = null;      // "flashcards" | "quiz"
+    let practicePool = [];        // entries matching the current book filter
+    let practiceEntries = [];     // shuffled working set for the active session
+    let practiceIndex = 0;
+    let practiceRevealed = false; // flashcards: is the current card flipped?
+    let quizScore = 0;
+    let quizChoices = [];         // [{ text, correct }] for the current question
+    let quizAnswered = false;
+    let quizSelected = -1;
+
+    function shuffled(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // Elements hidden while a practice session is open, restored on close.
+    function practiceToggleTargets() {
+      return [
+        document.querySelector(".book-row"),
+        document.querySelector(".lookup"),
+        out,
+        document.querySelector(".foot"),
+        document.querySelector(".saved-section"),
+      ];
+    }
+
+    async function openPractice() {
+      practiceToggleTargets().forEach(el => el.hidden = true);
+      $("practice-section").hidden = false;
+      $("practice-body").innerHTML = ""; // clear any leftover screen from a previous session
+      await renderPracticeSetup();
+    }
+
+    function closePractice() {
+      $("practice-section").hidden = true;
+      practiceToggleTargets().forEach(el => el.hidden = false);
+      practiceMode = null;
+    }
+
+    async function renderPracticeSetup() {
+      practicePool = await getEntries(bookFilter ? { book: bookFilter } : undefined);
+      const n = practicePool.length;
+      $("practice-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Practice${bookFilter ? ` — ${escapeHtml(bookFilter)}` : ""}</h2>
+          <button id="practice-close" type="button" class="btn-practice-close" aria-label="Close practice">×</button>
+        </div>
+        <p class="practice-lede">${n} word${n === 1 ? "" : "s"} ${bookFilter ? "in this book" : "saved"}.</p>
+        <div class="practice-mode-buttons">
+          <button id="start-flashcards" type="button" ${n < 1 ? "disabled" : ""}>Flashcards</button>
+          <button id="start-quiz" type="button" ${n < 4 ? "disabled" : ""}>Quiz</button>
+        </div>
+        ${ n < 4 ? `<p class="practice-hint">Save at least 4 words${bookFilter ? " in this book" : ""} to unlock the quiz.</p>` : "" }
+      `;
+    }
+
+    function startPractice(mode) {
+      practiceMode = mode;
+      practiceEntries = shuffled(practicePool);
+      practiceIndex = 0;
+      practiceRevealed = false;
+      quizScore = 0;
+      if (mode === "flashcards") renderFlashcard(); else renderQuizQuestion();
+    }
+
+    // ---- flashcards ----
+    function renderFlashcard() {
+      const e = practiceEntries[practiceIndex];
+      const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
+      $("practice-body").innerHTML = `
+        <div class="practice-head">
+          <p class="practice-progress">Card ${practiceIndex + 1} of ${practiceEntries.length}</p>
+          <button id="practice-close" type="button" class="btn-practice-close" aria-label="Close practice">×</button>
+        </div>
+        <article class="card flashcard" id="flashcard">
+          <div class="headword">${escapeHtml(e.word)}</div>
+          ${ e.partOfSpeech ? `<span class="pos">${escapeHtml(e.partOfSpeech)}</span>` : "" }
+          ${ practiceRevealed ? `
+            <p class="def">${escapeHtml(e.meaning)}</p>
+            ${ e.example ? `<p class="example">“${escapeHtml(e.example)}”</p>` : "" }
+            ${ (e.synonyms||[]).length ? `<p class="chips-label">Synonyms</p>
+               <div class="chips">${e.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
+            ${ (e.antonyms||[]).length ? `<p class="chips-label">Antonyms</p>
+               <div class="chips">${e.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
+          ` : `<p class="flashcard-hint">Tap the card to reveal the meaning</p>` }
+        </article>
+        <div class="practice-nav">
+          <button id="practice-prev" type="button" class="btn-practice-nav" ${practiceIndex === 0 ? "disabled" : ""}>Prev</button>
+          <button id="practice-next" type="button">${practiceIndex === practiceEntries.length - 1 ? "Finish" : "Next"}</button>
+        </div>
+      `;
+    }
+
+    function flipFlashcard() {
+      practiceRevealed = !practiceRevealed;
+      renderFlashcard();
+    }
+
+    function nextFlashcard() {
+      if (practiceIndex === practiceEntries.length - 1) { renderPracticeDone(); return; }
+      practiceIndex++;
+      practiceRevealed = false;
+      renderFlashcard();
+    }
+
+    function prevFlashcard() {
+      if (practiceIndex === 0) return;
+      practiceIndex--;
+      practiceRevealed = false;
+      renderFlashcard();
+    }
+
+    // ---- quiz ----
+    // Wrong answers are other saved words' real definitions — preferring the
+    // same part of speech so they're not trivially guessable, falling back to
+    // any other saved word if there aren't enough same-POS ones.
+    function pickDistractors(target, pool, count) {
+      const others = pool.filter(e => e.id !== target.id);
+      const samePos = target.partOfSpeech ? others.filter(e => e.partOfSpeech === target.partOfSpeech) : [];
+      const ordered = [...shuffled(samePos), ...shuffled(others)];
+      const picks = [];
+      const used = new Set([target.meaning]);
+      for (const e of ordered) {
+        if (picks.length >= count) break;
+        if (used.has(e.meaning)) continue;
+        used.add(e.meaning);
+        picks.push(e.meaning);
+      }
+      return picks;
+    }
+
+    function renderQuizQuestion() {
+      const e = practiceEntries[practiceIndex];
+      const distractors = pickDistractors(e, practiceEntries, 3);
+      quizChoices = shuffled([
+        { text: e.meaning, correct: true },
+        ...distractors.map(text => ({ text, correct: false })),
+      ]);
+      quizAnswered = false;
+      quizSelected = -1;
+      renderQuizBody();
+    }
+
+    function renderQuizBody() {
+      const e = practiceEntries[practiceIndex];
+      $("practice-body").innerHTML = `
+        <div class="practice-head">
+          <p class="practice-progress">Question ${practiceIndex + 1} of ${practiceEntries.length} · Score ${quizScore}</p>
+          <button id="practice-close" type="button" class="btn-practice-close" aria-label="Close practice">×</button>
+        </div>
+        <article class="card">
+          <div class="headword">${escapeHtml(e.word)}</div>
+          ${ e.partOfSpeech ? `<span class="pos">${escapeHtml(e.partOfSpeech)}</span>` : "" }
+          <p class="quiz-prompt">Which is the correct meaning?</p>
+          <div class="quiz-choices">
+            ${ quizChoices.map((c, i) => {
+              const cls = quizAnswered ? (c.correct ? "correct" : (i === quizSelected ? "incorrect" : "")) : "";
+              return `<button type="button" class="quiz-choice ${cls}" data-index="${i}" ${quizAnswered ? "disabled" : ""}>${escapeHtml(c.text)}</button>`;
+            }).join("") }
+          </div>
+          ${ quizAnswered ? `<div class="practice-nav">
+            <button id="practice-next" type="button">${practiceIndex === practiceEntries.length - 1 ? "See results" : "Next question"}</button>
+          </div>` : "" }
+        </article>
+      `;
+    }
+
+    function answerQuiz(index) {
+      if (quizAnswered) return;
+      quizAnswered = true;
+      quizSelected = index;
+      if (quizChoices[index].correct) quizScore++;
+      renderQuizBody();
+    }
+
+    function nextQuizQuestion() {
+      if (practiceIndex === practiceEntries.length - 1) { renderPracticeDone(); return; }
+      practiceIndex++;
+      renderQuizQuestion();
+    }
+
+    // ---- shared end screen ----
+    function renderPracticeDone() {
+      const isQuiz = practiceMode === "quiz";
+      $("practice-body").innerHTML = `
+        <div class="practice-head">
+          <p class="practice-progress">${isQuiz ? "Quiz" : "Flashcards"} complete</p>
+          <button id="practice-close" type="button" class="btn-practice-close" aria-label="Close practice">×</button>
+        </div>
+        <div class="practice-done">
+          <p class="practice-done-title">${
+            isQuiz ? `${quizScore} / ${practiceEntries.length} correct` : `You've gone through all ${practiceEntries.length} words.`
+          }</p>
+          <div class="practice-nav">
+            <button id="practice-restart" type="button" class="btn-practice-nav">Back to menu</button>
+            <button id="practice-again" type="button">Go again</button>
+          </div>
+        </div>
+      `;
+    }
+
+    $("practice-open").addEventListener("click", openPractice);
+    $("practice-section").addEventListener("click", (e) => {
+      if (e.target.id === "practice-close") { closePractice(); return; }
+      if (e.target.id === "start-flashcards") { startPractice("flashcards"); return; }
+      if (e.target.id === "start-quiz") { startPractice("quiz"); return; }
+      if (e.target.id === "practice-restart") { renderPracticeSetup(); return; }
+      if (e.target.id === "practice-again") { startPractice(practiceMode); return; }
+      if (e.target.id === "practice-prev") { prevFlashcard(); return; }
+      if (e.target.id === "practice-next") {
+        if (practiceMode === "flashcards") nextFlashcard(); else nextQuizQuestion();
+        return;
+      }
+      if (e.target.closest("#flashcard")) { flipFlashcard(); return; }
+      const choiceBtn = e.target.closest(".quiz-choice");
+      if (choiceBtn) answerQuiz(Number(choiceBtn.dataset.index));
+    });
 
     // ---------- voice input ----------
     // Fills the word field only — it never triggers the lookup itself. You review
