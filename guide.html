@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Margin — install &amp; testing guide</title>
+<style>
+  :root {
+    --paper:      #FBF9F4;
+    --paper-2:    #F3EFE6;
+    --surface:    #FFFFFF;
+    --ink:        #23201B;
+    --ink-soft:   #6B6459;
+    --oxblood:    #8A3033;
+    --oxblood-soft: #F0E2E2;
+    --on-oxblood: #FBF9F4;
+    --line:       #E3DDD0;
+    --radius: 16px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1E1B17; --paper-2: #2A2521; --surface: #262119;
+      --ink: #F0EAE0; --ink-soft: #A79E8E;
+      --oxblood: #C1585B; --oxblood-soft: #3A2224; --line: #3A342C;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: max(32px, env(safe-area-inset-top)) 20px 60px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+
+  header { padding-bottom: 26px; border-bottom: 1px solid var(--line); margin-bottom: 30px; }
+  .brand {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    font-weight: 700;
+    font-size: 40px;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+  .brand .dot { color: var(--oxblood); }
+  .tagline { margin: 0; color: var(--ink-soft); font-size: 16px; max-width: 46ch; }
+
+  h2 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    font-weight: 700;
+    font-size: 22px;
+    margin: 0 0 4px;
+  }
+  .section { margin-bottom: 42px; }
+  .section-lede { color: var(--ink-soft); font-size: 15px; margin: 0 0 18px; max-width: 52ch; line-height: 1.55; }
+
+  p { line-height: 1.6; font-size: 15.5px; }
+
+  /* ---- intro / disclaimer card ---- */
+  .intro-card {
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+  }
+  .intro-card p { margin: 0 0 12px; }
+  .intro-card p:last-child { margin-bottom: 0; }
+  .disclaimers { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 10px; }
+  .disclaimers li {
+    display: flex; gap: 10px; align-items: flex-start;
+    font-size: 14.5px; color: var(--ink-soft); line-height: 1.5;
+  }
+  .disclaimers li::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 6px; height: 6px; margin-top: 7px;
+    border-radius: 50%;
+    background: var(--oxblood);
+  }
+
+  /* ---- install cards ---- */
+  .platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 560px) { .platforms { grid-template-columns: 1fr; } }
+  .platform-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px 20px 22px;
+  }
+  .platform-name {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 15px;
+    margin: 0 0 4px;
+  }
+  .platform-note { color: var(--ink-soft); font-size: 13px; margin: 0 0 14px; }
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step;
+    display: flex; gap: 12px;
+    font-size: 14.5px; line-height: 1.5;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+  }
+  ol.steps li:first-child { border-top: none; padding-top: 0; }
+  ol.steps li::before {
+    content: counter(step);
+    flex: 0 0 auto;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--oxblood-soft);
+    color: var(--oxblood);
+    font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- link callout ---- */
+  .link-callout {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    background: var(--oxblood);
+    color: var(--on-oxblood);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    margin: 30px 0 0;
+    flex-wrap: wrap;
+  }
+  .link-callout .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+  .link-callout a {
+    color: var(--on-oxblood);
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-size: 19px;
+    font-weight: 700;
+    word-break: break-all;
+  }
+
+  footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 13.5px; text-align: center; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .section { animation: rise .3s ease both; }
+    .section:nth-of-type(2) { animation-delay: .05s; }
+    .section:nth-of-type(3) { animation-delay: .1s; }
+    .section:nth-of-type(4) { animation-delay: .15s; }
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 class="brand">Margin<span class="dot">.</span></h1>
+    <p class="tagline">A little app for catching words you don't know while you're reading — you're one of the first people trying it out.</p>
+  </header>
+
+  <section class="section">
+    <h2>Why "Margin"?</h2>
+    <p class="section-lede">Before there was an app for this, readers did it by hand: an unfamiliar word, and a quick note on what it means, scribbled in the blank space next to the text — the margin of the page. This is that same habit, just faster, and it remembers what you wrote.</p>
+  </section>
+
+  <section class="section intro-card">
+    <p>Hi — thanks for agreeing to poke at this. Margin is something I've been building myself: when you hit a word you don't know in a book, you type or speak it in, get a definition, and keep it tagged to that book so you can look back later.</p>
+    <p>A few honest things before you install it:</p>
+    <ul class="disclaimers">
+      <li>This is a personal project, not a finished product — expect rough edges, and things may look different next week as I keep working on it.</li>
+      <li>Words you save live only on the device you save them on. There's no account and nothing is backed up yet, so switching phones or clearing browser data will lose your list.</li>
+      <li>It's free, no account, no payment details — ever.</li>
+      <li>Nothing is being collected or sent anywhere beyond the free dictionary lookup itself.</li>
+    </ul>
+  </section>
+
+  <section class="section">
+    <h2>Get it on your phone</h2>
+    <p class="section-lede">It installs like a regular app icon, but it's really a website — so "installing" just means adding it to your home screen from the browser.</p>
+
+    <div class="platforms">
+      <div class="platform-card">
+        <p class="platform-name">iPhone &amp; iPad</p>
+        <p class="platform-note">Must be opened in Safari — other browsers can't add home screen icons on iOS.</p>
+        <ol class="steps">
+          <li>Open the link below in <strong>Safari</strong>.</li>
+          <li>Tap the <strong>Share</strong> icon (square with an arrow).</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+          <li>Tap <strong>Add</strong> in the top right.</li>
+        </ol>
+      </div>
+
+      <div class="platform-card">
+        <p class="platform-name">Android</p>
+        <p class="platform-note">Chrome is the most reliable browser for this.</p>
+        <ol class="steps">
+          <li>Open the link below in <strong>Chrome</strong>.</li>
+          <li>Tap the <strong>⋮</strong> menu, top right.</li>
+          <li>Tap <strong>Add to Home screen</strong> (sometimes shown as <strong>Install app</strong>).</li>
+          <li>Confirm by tapping <strong>Add</strong> / <strong>Install</strong>.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="link-callout">
+      <div>
+        <div class="label">Open this link</div>
+        <a href="https://debashis9.github.io/vocab_capture/" target="_blank" rel="noopener">debashis9.github.io/vocab_capture</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Trying it out</h2>
+    <p class="section-lede">Once it's on your home screen, open it like any app — it'll fill the screen with no browser bar around it.</p>
+    <p>Type (or tap the mic and speak) a word you've come across recently, add the title of whatever you were reading in the "Reading" field, and hit Look up. If you like what comes back, tap Save to list. That's really it — the more real words you try, the more useful your feedback is.</p>
+    <p>Once you've saved a few, tap <strong>Practice</strong> above your saved list to review them — as flashcards (tap a card to flip it and reveal the meaning), or as a quick multiple-choice quiz. Quiz mode needs at least 4 saved words to have enough wrong answers to choose from; flashcards work with just one.</p>
+    <p>There's also a small light / dark / system icon in the top corner if the default look isn't to your taste.</p>
+  </section>
+
+  <footer>
+    Questions, confusions, or things that broke — just tell whoever sent you this. That's exactly what this round of testing is for.
+  </footer>
+</div>
+</body>
+</html>
