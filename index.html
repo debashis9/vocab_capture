@@ -118,15 +118,26 @@
 
     /* ---- Lookup bar ---- */
     .lookup { display: flex; gap: 10px; }
-    .lookup input {
-      flex: 1; min-width: 0;
+    .word-field { position: relative; flex: 1; min-width: 0; }
+    .word-field input {
+      width: 100%;
       font-family: "Fraunces", serif; font-size: 22px;
       background: var(--surface);
       border: 1px solid var(--line); border-radius: var(--radius);
-      padding: 14px 16px; color: var(--ink);
+      padding: 14px 40px 14px 16px; color: var(--ink);
     }
-    .lookup input::placeholder { color: #B7AE9E; font-style: italic; }
-    .lookup input:focus { outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent; }
+    .word-field input::placeholder { color: #B7AE9E; font-style: italic; }
+    .word-field input:focus { outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent; }
+
+    .btn-clear {
+      position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+      display: flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; padding: 0;
+      background: transparent; color: var(--ink-soft);
+      border: none; border-radius: 8px;
+    }
+    .btn-clear:hover { background: var(--paper-2); color: var(--oxblood); }
+    .btn-clear[hidden] { display: none; }
 
     button {
       font: inherit; font-weight: 600; cursor: pointer;
@@ -283,8 +294,16 @@
 
     <!-- The lookup bar -->
     <div class="lookup">
-      <input id="word" type="text" placeholder="type a word…" autocomplete="off"
-             autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+      <div class="word-field">
+        <input id="word" type="text" placeholder="type a word…" autocomplete="off"
+               autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+        <button id="clear-word" type="button" class="btn-clear" aria-label="Clear" hidden>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
       <button id="mic" type="button" class="btn-mic" aria-label="Speak a word" title="Speak a word">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
@@ -705,6 +724,7 @@
         // Chrome tacks sentence punctuation onto single-word results (e.g. "incessant.") — strip it.
         $("word").value = e.results[0][0].transcript.trim().replace(/[.,!?;:]+$/, "");
         $("word").focus();
+        updateClearButton();
       });
       recognition.addEventListener("end", stopListening);
       recognition.addEventListener("error", stopListening);
@@ -721,9 +741,22 @@
       $("mic").remove();
     }
 
+    // ---------- clear button ----------
+    // Shows only once there's text to clear; voice input also triggers it (see above).
+    function updateClearButton() {
+      $("clear-word").hidden = !$("word").value;
+    }
+    updateClearButton();
+
     // ---------- events ----------
     $("go").addEventListener("click", () => lookup($("word").value));
+    $("word").addEventListener("input", updateClearButton);
     $("word").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup($("word").value); });
+    $("clear-word").addEventListener("click", () => {
+      $("word").value = "";
+      updateClearButton();
+      $("word").focus();
+    });
     out.addEventListener("click", (e) => {
       if (e.target.id === "save") saveCurrentResult();
       if (e.target.id === "ai-lookup") getAIDefinition();
