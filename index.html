@@ -181,7 +181,7 @@
     }
     .chip.ant { background: var(--oxblood-soft); border-color: #e3cccc; }
 
-    .save-row { margin-top: 22px; text-align: right; }
+    .save-row { margin-top: 22px; display: flex; justify-content: flex-end; gap: 10px; }
     .btn-save {
       background: transparent; color: var(--oxblood);
       border: 1.5px solid var(--oxblood);
@@ -189,6 +189,19 @@
     }
     .btn-save:hover { background: var(--oxblood-soft); }
     .btn-save.saved { border-color: var(--line); color: var(--ink-soft); }
+
+    .btn-ai {
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line);
+      padding: 10px 18px;
+    }
+    .btn-ai:hover { color: var(--oxblood); border-color: var(--oxblood); }
+
+    .ai-badge {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px;
+      padding: 2px 8px; margin-left: 8px; vertical-align: 2px;
+    }
 
     .foot { margin-top: 30px; color: var(--ink-soft); font-size: 13px; text-align: center; }
     .foot code { background: var(--paper-2); padding: 1px 6px; border-radius: 5px; }
@@ -282,6 +295,12 @@
     // ---------- tiny helpers ----------
     const $ = (id) => document.getElementById(id);
     const out = $("out");
+
+    // ---------- AI definitions (M4, dormant by default) ----------
+    // Flip to true once the LLM proxy is deployed and its API billing is set up.
+    // AI_ENDPOINT should point at the deployed Cloudflare Worker (see worker/).
+    const AI_ENABLED = false;
+    const AI_ENDPOINT = "http://localhost:8787/define";
 
     // Remember the current book between sessions (simple key/value, not the word list).
     const BOOK_KEY = "margin.book";
@@ -432,7 +451,25 @@
         example: firstDef.example || "",
         synonyms: syn,
         antonyms: ant,
+        source: "typed",
       };
+    }
+
+    // Asks the LLM proxy for a definition, tagged to the book for context-aware
+    // sense selection. Returns the same shape as pickBest() so render() and
+    // saveCurrentResult() don't need to know which source produced the result.
+    async function lookupAI(word, book) {
+      const res = await fetch(AI_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word, book }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "AI lookup failed (HTTP " + res.status + ")");
+      }
+      const data = await res.json();
+      return { ...data, phonetic: "", audio: "", source: "ai" };
     }
 
     // The word currently on screen, so the save button knows what to store.
@@ -453,6 +490,8 @@
                 <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
               </svg>
             </button>` : ""
+          }${
+            w.source === "ai" ? `<span class="ai-badge">AI-generated</span>` : ""
           }
           <p class="def">${escapeHtml(w.definition)}</p>
           ${ w.example ? `<p class="example">“${escapeHtml(w.example)}”</p>` : "" }
@@ -461,9 +500,28 @@
           ${ w.antonyms.length ? `<p class="chips-label">Antonyms</p>
              <div class="chips">${w.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
           <div class="save-row">
+            ${ AI_ENABLED && w.source !== "ai"
+              ? `<button id="ai-lookup" class="btn-ai" type="button">Get AI definition</button>`
+              : "" }
             <button id="save" class="btn-save" type="button">Save to list</button>
           </div>
         </article>`;
+    }
+
+    // Replaces the card with an AI-generated definition for the same word.
+    async function getAIDefinition() {
+      const btn = $("ai-lookup");
+      if (!currentResult || btn.disabled) return;
+
+      btn.disabled = true;
+      btn.textContent = "Asking Claude…";
+      try {
+        const result = await lookupAI(currentResult.word, $("book").value.trim());
+        render(result);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Get AI definition";
+      }
     }
 
     // Saves the word currently shown in the card, tagged to the "Reading" field.
@@ -482,7 +540,7 @@
           antonyms: currentResult.antonyms,
           example: currentResult.example,
           book: $("book").value.trim(),
-          source: "typed",
+          source: currentResult.source || "typed",
         });
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
@@ -610,6 +668,7 @@
     $("word").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup($("word").value); });
     out.addEventListener("click", (e) => {
       if (e.target.id === "save") saveCurrentResult();
+      if (e.target.id === "ai-lookup") getAIDefinition();
       const audioBtn = e.target.closest(".btn-audio");
       if (audioBtn) new Audio(audioBtn.dataset.audio).play();
     });
