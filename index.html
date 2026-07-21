@@ -343,6 +343,42 @@
       margin: 0 0 20px;
     }
     .practice-done .practice-nav { justify-content: center; }
+
+    /* ---- Auth (Supabase magic link) ---- */
+    .auth-section { margin-top: 40px; }
+    .auth-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 26px 24px;
+    }
+    .auth-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 22px; margin: 0 0 6px; }
+    .auth-lede { color: var(--ink-soft); font-size: 14px; margin: 0 0 20px; }
+    .auth-form { display: flex; gap: 10px; }
+    .auth-form[hidden] { display: none; }
+    .auth-form input {
+      flex: 1; min-width: 0;
+      font: inherit; font-size: 16px;
+      background: var(--paper-2);
+      border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 12px 14px; color: var(--ink);
+    }
+    .auth-form input:focus { outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent; }
+    .auth-status { margin: 16px 0 0; color: var(--ink-soft); font-size: 14px; }
+    .auth-status.error { color: var(--oxblood); }
+
+    .account-bar {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin: 4px 0 18px;
+    }
+    .account-email { color: var(--ink-soft); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .btn-signout {
+      flex: 0 0 auto;
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line);
+      padding: 6px 14px; font-size: 12px;
+    }
+    .btn-signout:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
   </style>
 </head>
 
@@ -355,67 +391,153 @@
       <button id="install" type="button" class="btn-install" hidden>Install Margin</button>
     </header>
 
-    <!-- Book this word came from. Value is remembered between sessions. -->
-    <div class="book-row">
-      <label for="book">Reading</label>
-      <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
-    </div>
+    <!-- Signed-out state: only this shows. Signed-in state: only #app-content shows. -->
+    <section id="auth-section" class="auth-section" hidden>
+      <div class="auth-card">
+        <h2 class="auth-title">Sign in to Margin</h2>
+        <p class="auth-lede">We'll email you a link — no password to remember.</p>
+        <form id="auth-form" class="auth-form">
+          <input id="auth-email" type="email" placeholder="you@example.com" autocomplete="email" required />
+          <button type="submit">Send me a link</button>
+        </form>
+        <p id="auth-status" class="auth-status" hidden></p>
+      </div>
+    </section>
 
-    <!-- The lookup bar -->
-    <div class="lookup">
-      <div class="word-field">
-        <input id="word" type="text" placeholder="type a word…" autocomplete="off"
-               autocapitalize="none" spellcheck="false" enterkeyhint="search" />
-        <button id="clear-word" type="button" class="btn-clear" aria-label="Clear" hidden>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
+    <div id="app-content" hidden>
+      <!-- Signed-in account strip. -->
+      <div class="account-bar">
+        <span id="account-email" class="account-email"></span>
+        <button id="sign-out" type="button" class="btn-signout">Sign out</button>
+      </div>
+
+      <!-- Book this word came from. Value is remembered between sessions. -->
+      <div class="book-row">
+        <label for="book">Reading</label>
+        <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+      </div>
+
+      <!-- The lookup bar -->
+      <div class="lookup">
+        <div class="word-field">
+          <input id="word" type="text" placeholder="type a word…" autocomplete="off"
+                 autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+          <button id="clear-word" type="button" class="btn-clear" aria-label="Clear" hidden>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <button id="mic" type="button" class="btn-mic" aria-label="Speak a word" title="Speak a word">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+            <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+            <line x1="12" y1="18" x2="12" y2="22"/>
           </svg>
         </button>
+        <button id="go">Look up</button>
       </div>
-      <button id="mic" type="button" class="btn-mic" aria-label="Speak a word" title="Speak a word">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-          <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
-          <line x1="12" y1="18" x2="12" y2="22"/>
-        </svg>
-      </button>
-      <button id="go">Look up</button>
-    </div>
 
-    <!-- One of: idle hint / loading / error / the card -->
-    <div id="out">
-      <p class="status">Type a word above and press Enter.</p>
-    </div>
+      <!-- One of: idle hint / loading / error / the card -->
+      <div id="out">
+        <p class="status">Type a word above and press Enter.</p>
+      </div>
 
-    <p class="foot">
-      Lookups come from a free dictionary. Saved words live on this device only, for now.
-    </p>
+      <p class="foot">
+        Lookups come from a free dictionary. Saved words live on this device only, for now.
+      </p>
 
-    <!-- Saved list: loads on open, filterable by book, each entry deletable. -->
-    <section class="saved-section">
-      <div class="saved-header">
-        <h2 class="saved-title">Saved words</h2>
-        <div class="saved-header-actions">
-          <select id="book-filter" class="book-filter">
-            <option value="">All books</option>
-          </select>
-          <button id="practice-open" type="button" class="btn-practice" hidden>Practice</button>
+      <!-- Saved list: loads on open, filterable by book, each entry deletable. -->
+      <section class="saved-section">
+        <div class="saved-header">
+          <h2 class="saved-title">Saved words</h2>
+          <div class="saved-header-actions">
+            <select id="book-filter" class="book-filter">
+              <option value="">All books</option>
+            </select>
+            <button id="practice-open" type="button" class="btn-practice" hidden>Practice</button>
+          </div>
         </div>
-      </div>
-      <div id="saved-list"></div>
-    </section>
+        <div id="saved-list"></div>
+      </section>
 
-    <!-- Flashcards + quiz, scoped to whatever the book filter above is set to. -->
-    <section id="practice-section" class="practice-section" hidden>
-      <div id="practice-body"></div>
-    </section>
+      <!-- Flashcards + quiz, scoped to whatever the book filter above is set to. -->
+      <section id="practice-section" class="practice-section" hidden>
+        <div id="practice-body"></div>
+      </section>
+    </div>
   </div>
 
+  <!-- Supabase JS v2, loaded before our own script so `supabase.createClient` is ready. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     // ---------- tiny helpers ----------
     const $ = (id) => document.getElementById(id);
     const out = $("out");
+
+    // ---------- auth (Supabase magic link) ----------
+    // Fill these in from your Supabase project's Settings -> API page.
+    // The anon/public key is safe to embed client-side by design — Row Level
+    // Security policies on the Supabase side are what actually protect data,
+    // not this key.
+    const SUPABASE_URL = "YOUR_SUPABASE_PROJECT_URL";
+    const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    function showSignedOut() {
+      $("app-content").hidden = true;
+      $("auth-section").hidden = false;
+    }
+
+    function showSignedIn(session) {
+      $("auth-section").hidden = true;
+      $("app-content").hidden = false;
+      $("account-email").textContent = session.user.email;
+    }
+
+    // Reacts to every future change: magic-link completion, sign-out, token
+    // refresh. It also fires once immediately with whatever session it finds
+    // on load — the explicit getSession() call below is a belt-and-suspenders
+    // check for that same initial state, so there's no gap where the wrong
+    // screen is showing while that first event is still in flight.
+    sb.auth.onAuthStateChange((_event, session) => {
+      if (session) showSignedIn(session); else showSignedOut();
+    });
+
+    sb.auth.getSession().then(({ data: { session } }) => {
+      if (session) showSignedIn(session); else showSignedOut();
+    });
+
+    $("auth-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = $("auth-email").value.trim();
+      if (!email) return;
+
+      const btn = e.target.querySelector("button");
+      const status = $("auth-status");
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.origin + window.location.pathname },
+      });
+
+      btn.disabled = false;
+      btn.textContent = "Send me a link";
+      status.hidden = false;
+      if (error) {
+        status.className = "auth-status error";
+        status.textContent = "Something went wrong: " + error.message;
+      } else {
+        status.className = "auth-status";
+        status.textContent = `Check your inbox — we sent a sign-in link to ${email}.`;
+      }
+    });
+
+    $("sign-out").addEventListener("click", () => sb.auth.signOut());
 
     // ---------- AI definitions (M4, dormant by default) ----------
     // Flip to true once the LLM proxy is deployed and its API billing is set up.

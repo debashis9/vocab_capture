@@ -23,22 +23,37 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   answers drawn from your other saved words' real definitions (preferring the same part of
   speech so they're not trivially guessable) — no AI, no network call, works entirely off
   what's already in IndexedDB. Needs 1+ saved word for flashcards, 4+ for quiz.
+- **Phase 2 (cloud sync) — started: auth only.** Supabase JS v2 (CDN, no build step) gates
+  the whole app behind email magic-link sign-in — signed out shows only a sign-in card,
+  signed in shows the normal app plus an email + Sign out strip. `SUPABASE_URL` /
+  `SUPABASE_ANON_KEY` in `index.html` are placeholders until filled in with a real project.
+  Storage is still local IndexedDB only — signing in doesn't sync anything yet, that's the
+  next step.
 - Live and installed on Windows and Android; hosted via GitHub Pages.
 
 ## Architecture (hold to these)
 - **One file:** the whole app lives in `index.html` (HTML + CSS + JS inline), kept readable
   on purpose. Do not split into a build system or framework unless explicitly asked.
-- **Plain vanilla JS.** No React, no bundler, no npm dependencies in the app itself.
+- **Plain vanilla JS.** No React, no bundler, no npm dependencies in the app itself. The one
+  exception is Supabase JS, loaded via `<script src="...cdn.jsdelivr.net...">` — still no
+  build step, so it fits the same spirit.
 - **PWA:** `manifest.json` + `sw.js` make it installable. The service worker caches only the
-  app shell, never dictionary/API responses.
+  app shell, never dictionary/API responses. Known gap: it also doesn't cache the Supabase
+  CDN script, so opening the (now auth-gated) app fully offline will fail until that's
+  addressed — not fixed yet, flagged for later.
 - **Lookups:** currently the free dictionaryapi.dev API (no key). An LLM upgrade comes later.
 
 ## Rules that protect future phases — do not break
 1. **Wrap all persistence in a small storage module** (`saveEntry`, `getEntries`,
    `deleteEntry`). The UI must never touch the storage layer directly. This is what lets us
-   swap local storage for a cloud database (Phase 2) without rewriting the UI.
+   swap local storage for a cloud database (Phase 2) without rewriting the UI. Not done yet —
+   Phase 2 so far is auth only; `saveEntry`/`getEntries`/`deleteEntry` are still pure
+   IndexedDB, not wired to Supabase.
 2. **Never hardcode or commit secrets/API keys.** When the LLM arrives (Phase 3), the key
-   lives only in a serverless proxy's environment — never in this repo.
+   lives only in a serverless proxy's environment — never in this repo. **Exception, not a
+   violation:** the Supabase anon/public key IS meant to be embedded client-side — it's
+   public by design, and Row Level Security policies on the Supabase side (not the key) are
+   what actually protect data. Don't treat it like the Anthropic key.
 3. **Preserve the visual style:** warm paper ground (#FBF9F4), oxblood accent (#8A3033),
    Fraunces (serif, for the word/headword) + Inter (UI). Keep it calm and editorial.
 4. Keep it accessible: visible keyboard focus, respect reduced-motion, responsive to mobile.
@@ -56,7 +71,10 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 - M5: polish (offline-aware error message, install prompt, dark theme). DONE.
 - **Phase 4: flashcards + quiz, scoped to the current book filter. DONE** (see Current state
   above for details). Client-side only — no auth needed, which is why this went ahead of
-  Phase 2 (cloud sync, still not started).
+  Phase 2 back when Phase 2 hadn't started.
+- **Phase 2 (cloud sync): in progress.** Step 1, Supabase magic-link auth, is DONE (see
+  Current state). Still to do: wire `saveEntry`/`getEntries`/`deleteEntry` to a Supabase
+  table instead of IndexedDB (or sync between the two), scoped per signed-in user.
 
 ## Working style
 Explain changes in plain terms — I'm learning. Prefer small, reviewable steps over large
