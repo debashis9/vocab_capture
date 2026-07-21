@@ -268,6 +268,7 @@
     .btn-practice:hover { background: var(--oxblood-soft); }
     .btn-practice[hidden] { display: none; } /* no saved words at all yet */
     .saved-empty { color: var(--ink-soft); font-size: 14px; }
+    .saved-empty.error { color: var(--oxblood); }
     .saved-entry { border-bottom: 1px solid var(--line); }
     .saved-entry:last-child { border-bottom: none; }
     .saved-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -306,6 +307,7 @@
     .btn-practice-close:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
 
     .practice-lede { color: var(--ink-soft); font-size: 14px; margin: 0 0 18px; }
+    .practice-lede.error { color: var(--oxblood); }
     .practice-hint { color: var(--ink-soft); font-size: 13px; font-style: italic; margin: 12px 0 0; }
     .practice-mode-buttons { display: flex; gap: 10px; }
     .practice-mode-buttons button { flex: 1; padding: 16px 12px; }
@@ -445,7 +447,7 @@
       </div>
 
       <p class="foot">
-        Lookups come from a free dictionary. Saved words live on this device only, for now.
+        Lookups come from a free dictionary. Saved words sync to your account and follow you across devices.
       </p>
 
       <!-- Saved list: loads on open, filterable by book, each entry deletable. -->
@@ -486,15 +488,23 @@
 
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // Tracked so the storage functions below can refuse to run when signed out.
+    let currentSession = null;
+
     function showSignedOut() {
+      currentSession = null;
       $("app-content").hidden = true;
       $("auth-section").hidden = false;
     }
 
     function showSignedIn(session) {
+      currentSession = session;
       $("auth-section").hidden = true;
       $("app-content").hidden = false;
       $("account-email").textContent = session.user.email;
+      // Saved words are per-account now, so (re)load them the moment we know
+      // who's signed in — on initial load and again after a fresh sign-in.
+      refreshSavedList();
     }
 
     // Reacts to every future change: magic-link completion, sign-out, token
@@ -591,15 +601,83 @@
       applyTheme(currentTheme);
     });
 
-    // ---------- storage (IndexedDB) ----------
-    // The only part of the app allowed to touch IndexedDB. Everything else calls
-    // saveEntry / getEntries / deleteEntry and doesn't know or care how they're stored —
-    // that's what lets us swap in a cloud database later without touching the UI.
+    // ---------- storage (Supabase) ----------
+    // The only part of the app allowed to touch the database. Everything else calls
+    // saveEntry / getEntries / deleteEntry and doesn't know or care how they're stored.
+    //
+    // Note: the old word-merge behavior (saving a word you'd already saved used to
+    // fold the new book into that entry instead of creating a second row) is gone
+    // for now — this is a plain insert. Revisit if that's missed in practice.
+    function requireSession() {
+      if (!currentSession) throw new Error("You're signed out — please sign in again.");
+      return currentSession;
+    }
+
+    // DB row (snake_case) -> the shape the rest of the app already expects (camelCase).
+    function mapRow(row) {
+      return {
+        id: row.id,
+        word: row.word,
+        meaning: row.meaning,
+        partOfSpeech: row.part_of_speech,
+        synonyms: row.synonyms || [],
+        antonyms: row.antonyms || [],
+        example: row.example,
+        book: row.book,
+        source: row.source,
+        savedAt: row.created_at,
+      };
+    }
+
+    // entry: { word, meaning, partOfSpeech, synonyms, antonyms, example, book, source }
+    // user_id is never set here — the entries table defaults it to auth.uid(), and
+    // Row Level Security is what actually restricts each account to its own rows.
+    async function saveEntry(entry) {
+      requireSession();
+      const { data, error } = await sb
+        .from("entries")
+        .insert({
+          word: entry.word,
+          meaning: entry.meaning,
+          part_of_speech: entry.partOfSpeech,
+          synonyms: entry.synonyms || [],
+          antonyms: entry.antonyms || [],
+          example: entry.example,
+          book: entry.book,
+          source: entry.source,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return mapRow(data);
+    }
+
+    // Returns entries newest-first, optionally filtered to one book. RLS already
+    // limits this to the signed-in account's own rows.
+    async function getEntries({ book } = {}) {
+      requireSession();
+      let query = sb.from("entries").select("*").order("created_at", { ascending: false });
+      if (book) query = query.eq("book", book);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []).map(mapRow);
+    }
+
+    async function deleteEntry(id) {
+      requireSession();
+      const { error } = await sb.from("entries").delete().eq("id", id);
+      if (error) throw error;
+    }
+
+    // ---------- storage (IndexedDB) — unused for now ----------
+    // Kept in place, not deleted: Phase 2b will revisit local/offline caching
+    // (e.g. so the app still works with no connection). Nothing currently calls
+    // these — saveEntry/getEntries/deleteEntry above are Supabase-backed instead.
     const DB_NAME = "margin";
     const DB_VERSION = 1;
     const STORE = "entries";
 
-    function openDB() {
+    function openDBLocal() {
       return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = () => {
@@ -611,12 +689,8 @@
       });
     }
 
-    // entry: { word, meaning, partOfSpeech, synonyms, antonyms, example, book, source }
-    // One entry per word (case-insensitive). Saving a word already on the list merges
-    // into the existing record instead of duplicating it: the book is added to that
-    // entry's book list (skipped if it's already there), and the meaning/timestamp refresh.
-    async function saveEntry(entry) {
-      const db = await openDB();
+    async function saveEntryLocal(entry) {
+      const db = await openDBLocal();
       const wordKey = entry.word.trim().toLowerCase();
       const book = (entry.book || "").trim();
 
@@ -647,10 +721,8 @@
       });
     }
 
-    // Returns entries newest-first, optionally filtered to one book (a book name
-    // is checked for membership in the entry's comma-separated book list).
-    async function getEntries({ book } = {}) {
-      const db = await openDB();
+    async function getEntriesLocal({ book } = {}) {
+      const db = await openDBLocal();
       return new Promise((resolve, reject) => {
         const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
         req.onsuccess = () => {
@@ -666,8 +738,8 @@
       });
     }
 
-    async function deleteEntry(id) {
-      const db = await openDB();
+    async function deleteEntryLocal(id) {
+      const db = await openDBLocal();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, "readwrite");
         tx.objectStore(STORE).delete(id);
@@ -831,7 +903,8 @@
         refreshSavedList();
       } catch (err) {
         btn.disabled = false;
-        btn.textContent = "Save to list";
+        btn.textContent = "Couldn't save — try again";
+        setTimeout(() => { btn.textContent = "Save to list"; }, 3000);
       }
     }
 
@@ -844,7 +917,13 @@
 
     // Re-reads everything from storage and redraws the filter dropdown + the list.
     async function refreshSavedList() {
-      const entries = await getEntries();
+      let entries;
+      try {
+        entries = await getEntries();
+      } catch (err) {
+        $("saved-list").innerHTML = `<p class="saved-empty error">Couldn't load your saved words. Check your connection and try again.</p>`;
+        return;
+      }
       populateBookFilter(entries);
       const shown = bookFilter
         ? entries.filter(e => (e.book || "").split(",").map(b => b.trim()).includes(bookFilter))
@@ -955,7 +1034,18 @@
     }
 
     async function renderPracticeSetup() {
-      practicePool = await getEntries(bookFilter ? { book: bookFilter } : undefined);
+      try {
+        practicePool = await getEntries(bookFilter ? { book: bookFilter } : undefined);
+      } catch (err) {
+        $("practice-body").innerHTML = `
+          <div class="practice-head">
+            <p class="practice-progress">Practice</p>
+            <button id="practice-close" type="button" class="btn-practice-close" aria-label="Close practice">×</button>
+          </div>
+          <p class="practice-lede error">Couldn't load your saved words. Check your connection and try again.</p>
+        `;
+        return;
+      }
       const n = practicePool.length;
       $("practice-body").innerHTML = `
         <div class="practice-head">
@@ -1205,20 +1295,34 @@
     $("saved-list").addEventListener("click", async (e) => {
       const del = e.target.closest(".saved-delete");
       if (del) {
-        expandedIds.delete(del.dataset.id);
-        await deleteEntry(del.dataset.id);
-        refreshSavedList();
+        const originalText = del.textContent;
+        del.disabled = true;
+        del.textContent = "Deleting…";
+        try {
+          await deleteEntry(del.dataset.id);
+          expandedIds.delete(del.dataset.id);
+          refreshSavedList();
+        } catch (err) {
+          del.disabled = false;
+          del.textContent = "Couldn't delete — try again";
+          setTimeout(() => { del.textContent = originalText; }, 3000);
+        }
         return;
       }
       const row = e.target.closest(".saved-row");
       if (row) {
         const id = row.dataset.id;
         expandedIds.has(id) ? expandedIds.delete(id) : expandedIds.add(id);
-        renderSavedList(await getEntries(bookFilter ? { book: bookFilter } : undefined));
+        try {
+          renderSavedList(await getEntries(bookFilter ? { book: bookFilter } : undefined));
+        } catch (err) {
+          $("saved-list").innerHTML = `<p class="saved-empty error">Couldn't load your saved words. Check your connection and try again.</p>`;
+        }
       }
     });
 
-    refreshSavedList();
+    // Initial load happens from showSignedIn() once we know there's a session —
+    // no unconditional call here, since getEntries() refuses to run signed out.
 
     // ---------- register the service worker (needed for install + offline shell) ----------
     if ("serviceWorker" in navigator) {
