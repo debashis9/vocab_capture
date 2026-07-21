@@ -36,7 +36,28 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   you've already saved no longer merges the book into the existing row (the old IndexedDB
   version did) — it's a plain insert, so the same word saved from two books now makes two
   rows. Revisit if that's missed in practice.
-- Live and installed on Windows and Android; hosted via GitHub Pages.
+- Live and installed on Windows and Android; hosted via GitHub Pages. **Not yet pushed:**
+  all of Phase 2 (auth + Supabase storage) is committed locally on `main` but not pushed —
+  the live site still only has M0–M5 + Phase 4. See "Picking up next session" below.
+
+## Picking up next session
+- **Phase 2 code is written but not yet confirmed working end-to-end.** Signed in
+  successfully once; saving a word after the storage rewrite hasn't been verified yet —
+  testing got blocked by Supabase's email rate limit (see below) before that could happen.
+- **Confirm the `entries` table exists** with the right columns + RLS policies — the SQL to
+  create it (if not already run) is in the commit message for "Phase 2: wire storage to
+  Supabase" (`git show --stat` / `git log` to find it), or ask Claude to regenerate it.
+- **Pending decision: custom SMTP provider.** Supabase's default email sending is
+  rate-limited hard (fine for testing, hit the limit today from repeated sign-in attempts).
+  Two options discussed, not yet chosen: Gmail SMTP (free, uses the existing
+  debashis9@gmail.com with an app password, simplest) vs. Resend (free tier ~3,000/month,
+  more "correct" long-term, needs a new account + ideally a verified domain). Pick one,
+  wire it up in Supabase → Authentication → Emails → SMTP Settings.
+- **README.md needs trimming** — flagged as having too much information. Hold off on a
+  rewrite until there's time to review what actually stays; don't do this unsupervised.
+- **Nothing needs pushing to resume tomorrow** — everything is committed locally on `main`.
+  Push whenever, there's no urgency; the live GitHub Pages site simply stays on the older
+  (pre-Phase-2) commit until then.
 
 ## Architecture (hold to these)
 - **One file:** the whole app lives in `index.html` (HTML + CSS + JS inline), kept readable
