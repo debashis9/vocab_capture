@@ -2,6 +2,8 @@
 # Matters most from Phase 3, when the serverless proxy holds your API key.
 .env
 .env.*
+.dev.vars
+.dev.vars.*
 *.local
 secrets.json
 *.key

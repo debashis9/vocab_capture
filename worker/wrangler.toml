@@ -1,0 +1,13 @@
+name = "margin-llm-proxy"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+
+# CORS: which frontend origin is allowed to call this proxy.
+# Local dev default lets the python http.server test setup through.
+# Before deploying for real, set this to your actual GitHub Pages origin,
+# e.g. "https://<you>.github.io" (no trailing slash, no path).
+[vars]
+ALLOWED_ORIGIN = "http://localhost:8000"
+
+# ANTHROPIC_API_KEY is a secret, not a var — it's never written to this file.
+# Local dev: put it in .dev.vars (git-ignored). Production: `wrangler secret put ANTHROPIC_API_KEY`.

@@ -13,6 +13,10 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   than queueing/retrying failed lookups — lookups are inherently online-only, so this was
   scoped down from "offline queueing"), an in-app install button (`beforeinstallprompt`),
   and a dark theme via `prefers-color-scheme` that keeps the warm-paper/oxblood identity.
+- M4's LLM proxy (`worker/`) and its frontend button are built and locally tested, but
+  intentionally left off (`AI_ENABLED = false`) — activation is deferred until there's a
+  revenue-backed plan for the ongoing API cost, since it's billed separately from any
+  Claude.ai subscription.
 - Live and installed on Windows and Android; hosted via GitHub Pages.
 
 ## Architecture (hold to these)
@@ -37,7 +41,12 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 - M2: save lookups to IndexedDB via the storage module; a saved list that loads on open,
   filters by book, and supports delete. DONE.
 - M3: voice input (mic button, Web Speech API). DONE.
-- **M4 (next):** optional LLM-upgraded definitions (needs API + serverless proxy).
+- **M4: built but dormant.** A Cloudflare Worker proxy (`worker/`) calls Claude Haiku 4.5
+  for a book-context-aware AI definition, and the frontend has a "Get AI definition"
+  button — but it's feature-flagged off (`AI_ENABLED = false` in `index.html`) because
+  the API key needs its own separate billing (not covered by a Claude.ai subscription).
+  Decision: hold off until scaling to a wider audience with a revenue model in place, then
+  flip the flag and deploy the Worker. See `worker/README.md` for activation steps.
 - M5: polish (offline-aware error message, install prompt, dark theme). DONE.
 
 ## Working style
