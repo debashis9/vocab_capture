@@ -1,9 +1,12 @@
 # vocab_capture
 # Margin — build runbook
 
-Your standalone vocabulary app. This folder is **Milestones M0 + M1** from the project plan:
-an installable app (M0) that looks up a typed word from a free dictionary and shows it as a
-card (M1). No saving yet — that's M2, and the plan for it is at the bottom.
+Your standalone vocabulary app. This folder now covers **Milestones M0–M3 and M5** from the
+project plan: an installable app (M0) that looks up a typed word from a free dictionary and
+shows it as a card (M1), saves it locally with a filterable/deletable list (M2), accepts
+voice input (M3), and has a round of polish (M5): an offline-aware error message, an in-app
+install button, and a dark theme. Next up is M4, the optional LLM-upgraded definitions — see
+the milestone status at the bottom.
 
 ---
 
@@ -108,14 +111,17 @@ swap instead of a rewrite.
 
 - [x] **M0** — installable PWA shell (this folder)
 - [x] **M1** — typed lookup + result card (free dictionary API)
-- [ ] **M2** — save to IndexedDB, list + filter by book + delete  ← *do this next, with Claude Code*
-- [ ] **M3** — voice input (mic button)
-- [ ] **M4** — optional LLM upgrade (better definitions; needs the API + a proxy)
-- [ ] **M5** — polish
+- [x] **M2** — save to IndexedDB, list + filter by book + delete
+- [x] **M3** — voice input (mic button)
+- [ ] **M4** — optional LLM upgrade (better definitions; needs the API + a proxy)  ← *do this next*
+- [x] **M5** — polish: offline-aware error message, in-app install button, dark theme
+
+Beyond the original M2/M3 spec, also shipped: pronunciation audio playback on the result
+card and saved list, and same-word dedup (saving a word you've already saved merges the new
+book into that entry instead of creating a duplicate).
 
 ## Known Phase-1 limits (all expected)
 
 - The free dictionary misses rare/proper words and gives no context-aware sense — that's what the
   later LLM upgrade fixes.
 - Saved words live only on the device that saved them until Phase 2 (cloud sync).
-- Voice isn't wired yet (M3).

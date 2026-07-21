@@ -5,7 +5,14 @@ Margin is a personal vocabulary-capture app: catch an unknown word while reading
 physical book, look it up, and keep it — tagged to the book. Single-user, personal tool.
 
 ## Current state
-- Milestones M0 (installable PWA) and M1 (typed lookup) are DONE.
+- Milestones M0 (installable PWA), M1 (typed lookup), M2 (save/list/filter/delete via
+  IndexedDB), M3 (voice input), and M5 (polish) are DONE. Also shipped ahead of plan:
+  pronunciation audio playback and same-word dedup across books (saving a known word
+  merges books instead of duplicating the entry).
+- M5 polish specifically: an offline-aware error message (checks `navigator.onLine` rather
+  than queueing/retrying failed lookups — lookups are inherently online-only, so this was
+  scoped down from "offline queueing"), an in-app install button (`beforeinstallprompt`),
+  and a dark theme via `prefers-color-scheme` that keeps the warm-paper/oxblood identity.
 - Live and installed on Windows and Android; hosted via GitHub Pages.
 
 ## Architecture (hold to these)
@@ -27,13 +34,11 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 4. Keep it accessible: visible keyboard focus, respect reduced-motion, responsive to mobile.
 
 ## Roadmap
-- **M2 (next):** save lookups to IndexedDB via the storage module; a saved list that loads on
-  open, filters by book, and supports delete. Add a "Save to list" button on a successful lookup.
-  Entry fields: id, word, meaning, partOfSpeech, synonyms, antonyms, example, book,
-  source ("typed"), savedAt.
-- M3: voice input (mic button, Web Speech API).
-- M4: optional LLM-upgraded definitions (needs API + serverless proxy).
-- M5: polish (offline queueing, install prompts, theming).
+- M2: save lookups to IndexedDB via the storage module; a saved list that loads on open,
+  filters by book, and supports delete. DONE.
+- M3: voice input (mic button, Web Speech API). DONE.
+- **M4 (next):** optional LLM-upgraded definitions (needs API + serverless proxy).
+- M5: polish (offline-aware error message, install prompt, dark theme). DONE.
 
 ## Working style
 Explain changes in plain terms — I'm learning. Prefer small, reviewable steps over large

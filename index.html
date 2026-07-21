@@ -19,12 +19,29 @@
     :root {
       --paper:   #FBF9F4;  /* warm page */
       --paper-2: #F3EFE6;  /* card / inset */
+      --surface: #FFFFFF;  /* input / card background, sits above the page */
       --ink:     #23201B;  /* near-black text */
       --ink-soft:#6B6459;  /* muted labels */
       --oxblood: #8A3033;  /* accent — fountain-pen wine */
       --oxblood-soft: #f0e2e2;
+      --on-oxblood: #FBF9F4;  /* text/icons on an oxblood background — stays light in both themes */
+      --oxblood-hover: #75282b;
       --line:    #E3DDD0;  /* hairlines */
       --radius: 14px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper:   #1E1B17;
+        --paper-2: #2A2521;
+        --surface: #262119;
+        --ink:     #F0EAE0;
+        --ink-soft:#A79E8E;
+        --oxblood: #C1585B;
+        --oxblood-soft: #3A2224;
+        --oxblood-hover: #A6474A;
+        --line:    #3A342C;
+      }
     }
 
     * { box-sizing: border-box; }
@@ -53,6 +70,14 @@
     .brand .dot { color: var(--oxblood); }
     .tagline { margin: 4px 0 0; color: var(--ink-soft); font-size: 14px; }
 
+    .btn-install {
+      margin-top: 14px;
+      background: transparent; color: var(--oxblood);
+      border: 1.5px solid var(--oxblood);
+      padding: 8px 16px; font-size: 13px;
+    }
+    .btn-install:hover { background: var(--oxblood-soft); }
+
     /* ---- Book tag (bookplate) ---- */
     .book-row { display: flex; align-items: center; gap: 10px; margin: 20px 0 14px; }
     .book-row label {
@@ -72,7 +97,7 @@
     .lookup input {
       flex: 1; min-width: 0;
       font-family: "Fraunces", serif; font-size: 22px;
-      background: #fff;
+      background: var(--surface);
       border: 1px solid var(--line); border-radius: var(--radius);
       padding: 14px 16px; color: var(--ink);
     }
@@ -82,10 +107,10 @@
     button {
       font: inherit; font-weight: 600; cursor: pointer;
       border: none; border-radius: var(--radius);
-      background: var(--oxblood); color: var(--paper);
+      background: var(--oxblood); color: var(--on-oxblood);
       padding: 0 20px;
     }
-    button:hover { background: #75282b; }
+    button:hover { background: var(--oxblood-hover); }
     button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
     button:disabled { opacity: .5; cursor: default; }
 
@@ -111,7 +136,7 @@
     /* ---- Word specimen card ---- */
     .card {
       margin-top: 26px;
-      background: #fff;
+      background: var(--surface);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       padding: 24px 24px 26px;
@@ -209,6 +234,7 @@
     <header>
       <h1 class="brand">Margin<span class="dot">.</span></h1>
       <p class="tagline">Catch a word from whatever you're reading.</p>
+      <button id="install" type="button" class="btn-install" hidden>Install Margin</button>
     </header>
 
     <!-- Book this word came from. Value is remembered between sessions. -->
@@ -369,7 +395,10 @@
         const data = await res.json();
         render(pickBest(word, data));
       } catch (err) {
-        out.innerHTML = `<p class="status error">Couldn't reach the dictionary. Check your connection and try again.</p>`;
+        const message = navigator.onLine
+          ? "Couldn't reach the dictionary. Check your connection and try again."
+          : "You're offline — lookups need an internet connection. Try again once you're back online.";
+        out.innerHTML = `<p class="status error">${message}</p>`;
       } finally {
         $("go").disabled = false;
       }
@@ -612,6 +641,31 @@
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
     }
+
+    // ---------- install prompt ----------
+    // Chrome/Edge fire this instead of showing their own install UI immediately;
+    // we hold onto it and surface our own button so install isn't hidden in a menu.
+    let deferredInstallPrompt = null;
+    const installBtn = $("install");
+
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      installBtn.hidden = false;
+    });
+
+    installBtn.addEventListener("click", async () => {
+      if (!deferredInstallPrompt) return;
+      installBtn.hidden = true;
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+    });
+
+    window.addEventListener("appinstalled", () => {
+      installBtn.hidden = true;
+      deferredInstallPrompt = null;
+    });
   </script>
 </body>
 </html>
