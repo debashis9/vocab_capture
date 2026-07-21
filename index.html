@@ -522,7 +522,15 @@
 
       const { error } = await sb.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: window.location.origin + window.location.pathname },
+        options: {
+          // Public sign-ups are intentionally off — only emails already added
+          // in Supabase (Authentication -> Users) can sign in. Without this,
+          // signInWithOtp still respects the "disable signups" project
+          // setting even for existing users, and fails the same way it would
+          // for a stranger.
+          shouldCreateUser: false,
+          emailRedirectTo: window.location.origin + window.location.pathname,
+        },
       });
 
       btn.disabled = false;
