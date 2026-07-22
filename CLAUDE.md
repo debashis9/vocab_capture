@@ -30,7 +30,14 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   `auth.uid()`) instead of IndexedDB, so saved words follow you across devices. Public
   sign-up is intentionally off — only emails added under Authentication → Users in the
   Supabase dashboard can sign in (`shouldCreateUser: false` on the client, enforced
-  server-side by the project's disabled-signups setting). The old IndexedDB code is kept
+  server-side by the project's disabled-signups setting). **Since 2026-07-23, this is also
+  enforced at the database level**, not just the project's signups toggle: a
+  `public.allowed_emails` table (RLS-locked, no anon/authenticated access, managed only from
+  the SQL Editor/dashboard) plus a `before insert on auth.users` trigger
+  (`check_allowed_email()`) rejects account creation for any email not on the list. This
+  changes the invite order: **add the email to `allowed_emails` first, then "Add user" in the
+  dashboard** — the "Add user" action itself is an insert into `auth.users`, so it now goes
+  through the same check and fails if done first. The old IndexedDB code is kept
   as `openDBLocal`/`saveEntryLocal`/`getEntriesLocal`/`deleteEntryLocal` — unused, not
   deleted, for a Phase 2b offline-caching pass. One known simplification: saving a word
   you've already saved no longer merges the book into the existing row (the old IndexedDB
@@ -41,23 +48,21 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   the live site still only has M0–M5 + Phase 4. See "Picking up next session" below.
 
 ## Picking up next session
-- **Phase 2 code is written but not yet confirmed working end-to-end.** Signed in
-  successfully once; saving a word after the storage rewrite hasn't been verified yet —
-  testing got blocked by Supabase's email rate limit (see below) before that could happen.
-- **Confirm the `entries` table exists** with the right columns + RLS policies — the SQL to
-  create it (if not already run) is in the commit message for "Phase 2: wire storage to
-  Supabase" (`git show --stat` / `git log` to find it), or ask Claude to regenerate it.
-- **Pending decision: custom SMTP provider.** Supabase's default email sending is
-  rate-limited hard (fine for testing, hit the limit today from repeated sign-in attempts).
-  Two options discussed, not yet chosen: Gmail SMTP (free, uses the existing
-  debashis9@gmail.com with an app password, simplest) vs. Resend (free tier ~3,000/month,
-  more "correct" long-term, needs a new account + ideally a verified domain). Pick one,
-  wire it up in Supabase → Authentication → Emails → SMTP Settings.
+- **Phase 2 is fully verified end-to-end as of 2026-07-23.** Custom SMTP (Gmail, see below)
+  fixed the rate-limit block; signed in for real via magic link, saved a word, and confirmed
+  the row in the Supabase Table Editor with correct columns. The editor also showed **4 RLS
+  policies** active on `entries`, confirming RLS is actually enforcing (not just present) —
+  this had been the one thing a read-only anon-key probe couldn't distinguish earlier.
+- **SMTP decided: Gmail SMTP**, not Resend. Resend was picked first, then reversed on
+  finding out no domain is owned — Resend's sandbox mode can only email the signup address
+  itself, which doesn't work for family testers signing in with their own emails, and buying
+  a domain solely to unblock Resend wasn't worth it. Wired into Supabase → Authentication →
+  Emails → SMTP Settings using debashis9@gmail.com + a Google App Password. Revisit Resend
+  only if a real custom domain shows up for other reasons.
 - **README.md needs trimming** — flagged as having too much information. Hold off on a
   rewrite until there's time to review what actually stays; don't do this unsupervised.
-- **Nothing needs pushing to resume tomorrow** — everything is committed locally on `main`.
-  Push whenever, there's no urgency; the live GitHub Pages site simply stays on the older
-  (pre-Phase-2) commit until then.
+- **Pushed to `origin/main` on 2026-07-23.** Phase 2 (auth + Supabase storage + the
+  invite-only trigger) is now live on GitHub Pages, not just committed locally.
 
 ## Architecture (hold to these)
 - **One file:** the whole app lives in `index.html` (HTML + CSS + JS inline), kept readable
