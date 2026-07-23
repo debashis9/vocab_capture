@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Gemma 4 test — throwaway, not part of the app</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; background: #1e1b17; color: #f0eae0; }
+  h1 { font-size: 20px; }
+  .row { display: flex; gap: 10px; margin: 16px 0; }
+  input { flex: 1; padding: 10px; font-size: 16px; background: #262119; color: #f0eae0; border: 1px solid #3a342c; border-radius: 8px; }
+  button { padding: 10px 20px; font-size: 16px; background: #c1585b; color: white; border: none; border-radius: 8px; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  pre { background: #262119; padding: 16px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+  .error { color: #e08a8a; }
+</style>
+</head>
+<body>
+<h1>Gemma 4 definition test (throwaway, local only)</h1>
+<div class="row">
+  <input id="word" placeholder="word" />
+  <input id="book" placeholder="book (optional)" />
+  <select id="model">
+    <option value="26b">26B MoE</option>
+    <option value="31b">31B Dense</option>
+  </select>
+  <button id="go">Look up</button>
+</div>
+<pre id="out">Results appear here.</pre>
+
+<script>
+  const word = document.getElementById("word");
+  const book = document.getElementById("book");
+  const go = document.getElementById("go");
+  const out = document.getElementById("out");
+  const model = document.getElementById("model");
+
+  async function lookup() {
+    const w = word.value.trim();
+    if (!w) return;
+    go.disabled = true;
+    const start = Date.now();
+    out.textContent = "Looking up…";
+    try {
+      const res = await fetch("http://localhost:8787/define-gemma", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word: w, book: book.value.trim(), model: model.value }),
+      });
+      const data = await res.json();
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+      data._took_seconds = Number(elapsed);
+      out.textContent = JSON.stringify(data, null, 2);
+      out.className = data.error ? "error" : "";
+    } catch (err) {
+      out.textContent = "Request failed: " + err;
+      out.className = "error";
+    } finally {
+      go.disabled = false;
+    }
+  }
+
+  go.addEventListener("click", lookup);
+  word.addEventListener("keydown", (e) => { if (e.key === "Enter") lookup(); });
+</script>
+</body>
+</html>

@@ -60,7 +60,7 @@ export default {
     const url = new URL(request.url);
     try {
       const definition = url.pathname === "/define-gemma"
-        ? await lookupGemma(word, book, userMessage, env)
+        ? await lookupGemma(word, book, userMessage, env, body.model)
         : await lookupClaude(userMessage, env);
       return json(definition, 200, corsHeaders);
     } catch (err) {
@@ -98,10 +98,15 @@ async function lookupClaude(userMessage, env) {
 // Only gemma-4-26b-a4b-it (26B MoE) and gemma-4-31b-it (31B Dense) are
 // actually served by this API per ListModels — smaller variants some blog
 // posts mentioned aren't available here, likely meant for on-device/local
-// runtimes instead.
-const GEMMA_MODEL = "gemma-4-26b-a4b-it";
+// runtimes instead. Selectable per-request (body.model) for side-by-side
+// comparison; defaults to the 26B MoE variant tested first.
+const GEMMA_MODELS = {
+  "26b": "gemma-4-26b-a4b-it",
+  "31b": "gemma-4-31b-it",
+};
 
-async function lookupGemma(word, book, userMessage, env) {
+async function lookupGemma(word, book, userMessage, env, modelKey) {
+  const model = GEMMA_MODELS[modelKey] || GEMMA_MODELS["26b"];
   const prompt = `${SYSTEM_PROMPT}
 
 Respond with ONLY a JSON object — no markdown code fences, no commentary before or after — matching exactly this shape:
@@ -110,7 +115,7 @@ Respond with ONLY a JSON object — no markdown code fences, no commentary befor
 ${userMessage}`;
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMMA_MODEL}:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: "POST",
       headers: {
