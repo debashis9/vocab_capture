@@ -53,30 +53,91 @@ export default {
     const book = (body.book || "").trim();
     const userMessage = book ? `Word: "${word}"\nBook: "${book}"` : `Word: "${word}"`;
 
+    // EXPERIMENT (gemma-definitions branch): /define still uses Claude Haiku
+    // unchanged. /define-gemma is a parallel path hitting Google's free Gemma 4
+    // API, for side-by-side quality comparison before deciding whether to
+    // switch. Not wired into the frontend — curl it directly for now.
+    const url = new URL(request.url);
     try {
-      const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-      const response = await client.messages.create({
-        model: "claude-haiku-4-5",
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userMessage }],
-        output_config: {
-          format: { type: "json_schema", schema: DEFINITION_SCHEMA },
-        },
-      });
-
-      const textBlock = response.content.find((b) => b.type === "text");
-      if (!textBlock) {
-        return json({ error: "No definition returned" }, 502, corsHeaders);
-      }
-
-      const definition = JSON.parse(textBlock.text);
+      const definition = url.pathname === "/define-gemma"
+        ? await lookupGemma(word, book, userMessage, env)
+        : await lookupClaude(userMessage, env);
       return json(definition, 200, corsHeaders);
     } catch (err) {
       return json({ error: "Lookup failed", detail: String(err) }, 502, corsHeaders);
     }
   },
 };
+
+async function lookupClaude(userMessage, env) {
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  const response = await client.messages.create({
+    model: "claude-haiku-4-5",
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: "user", content: userMessage }],
+    output_config: {
+      format: { type: "json_schema", schema: DEFINITION_SCHEMA },
+    },
+  });
+
+  const textBlock = response.content.find((b) => b.type === "text");
+  if (!textBlock) throw new Error("No definition returned");
+  return JSON.parse(textBlock.text);
+}
+
+// EXPERIMENT (gemma-definitions branch): Google's Gemini API, pointed at a
+// free Gemma 4 model. Different wire shape from Anthropic's Messages API —
+// contents/parts instead of messages/content, response text at
+// candidates[0].content.parts[0].text instead of a content-block array.
+// Structured-output support isn't confirmed for Gemma the way it is for
+// Gemini proper, so the schema is spelled out in the prompt itself and the
+// response is parsed defensively (stripping ```json fences some
+// instruction-tuned models add even when told not to).
+//
+// Only gemma-4-26b-a4b-it (26B MoE) and gemma-4-31b-it (31B Dense) are
+// actually served by this API per ListModels — smaller variants some blog
+// posts mentioned aren't available here, likely meant for on-device/local
+// runtimes instead.
+const GEMMA_MODEL = "gemma-4-26b-a4b-it";
+
+async function lookupGemma(word, book, userMessage, env) {
+  const prompt = `${SYSTEM_PROMPT}
+
+Respond with ONLY a JSON object — no markdown code fences, no commentary before or after — matching exactly this shape:
+{"word": string, "pos": string, "definition": string, "example": string, "synonyms": string[], "antonyms": string[]}
+
+${userMessage}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMMA_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`Gemini API HTTP ${res.status}: ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  // Gemma 4 returns thinking as a separate part with `thought: true` ahead of
+  // the real answer — grabbing parts[0] unconditionally picks up the
+  // reasoning scratchpad instead of the final JSON. Skip thought parts.
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const rawText = parts.find((p) => !p.thought)?.text;
+  if (!rawText) throw new Error("No answer text in Gemma response: " + JSON.stringify(data));
+
+  const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  return { ...JSON.parse(cleaned), word };
+}
 
 function json(data, status, headers) {
   return new Response(JSON.stringify(data), {
