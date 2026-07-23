@@ -12,6 +12,7 @@
   button:disabled { opacity: .5; }
   pre { background: #262119; padding: 16px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
   .error { color: #e08a8a; }
+  #timer { font-size: 14px; color: #a79e8e; margin: 0 0 8px; }
 </style>
 </head>
 <body>
@@ -25,6 +26,7 @@
   </select>
   <button id="go">Look up</button>
 </div>
+<p id="timer"></p>
 <pre id="out">Results appear here.</pre>
 
 <script>
@@ -33,13 +35,21 @@
   const go = document.getElementById("go");
   const out = document.getElementById("out");
   const model = document.getElementById("model");
+  const timer = document.getElementById("timer");
 
   async function lookup() {
     const w = word.value.trim();
     if (!w) return;
     go.disabled = true;
-    const start = Date.now();
     out.textContent = "Looking up…";
+
+    // Starts the instant "Look up" is clicked; updates live while waiting;
+    // freezes at the final elapsed time once the result is shown.
+    const start = performance.now();
+    const tick = setInterval(() => {
+      timer.textContent = `${((performance.now() - start) / 1000).toFixed(1)}s…`;
+    }, 100);
+
     try {
       const res = await fetch("http://localhost:8787/define-gemma", {
         method: "POST",
@@ -47,14 +57,14 @@
         body: JSON.stringify({ word: w, book: book.value.trim(), model: model.value }),
       });
       const data = await res.json();
-      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-      data._took_seconds = Number(elapsed);
       out.textContent = JSON.stringify(data, null, 2);
       out.className = data.error ? "error" : "";
     } catch (err) {
       out.textContent = "Request failed: " + err;
       out.className = "error";
     } finally {
+      clearInterval(tick);
+      timer.textContent = `Took ${((performance.now() - start) / 1000).toFixed(1)}s`;
       go.disabled = false;
     }
   }
