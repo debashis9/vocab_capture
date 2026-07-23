@@ -17,6 +17,17 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   intentionally left off (`AI_ENABLED = false`) — activation is deferred until there's a
   revenue-backed plan for the ongoing API cost, since it's billed separately from any
   Claude.ai subscription.
+- **Multi-sense lookup, done 2026-07-23.** `pickBest()` used to grab only the free
+  dictionary's `meanings[0]`/`definitions[0]`, silently dropping every other sense — e.g.
+  "incandescent" showed the rare noun sense ("an incandescent lamp or bulb") instead of the
+  everyday adjective meaning sitting right next to it in the same API response. Now every
+  sense across every part of speech is collected into a `senses` array, and `render()` shows
+  all of them grouped by part of speech with a "Save this sense" button each, whenever
+  there's more than one. A single-sense word (or an AI-generated result, which already
+  picked one sense via book context) still renders the original single-card view unchanged.
+  Prototyped first on the (now-obsolete) `experiment/multi-sense-lookup` branch against the
+  local IndexedDB path before being carried over to `main` with real Supabase auth/storage
+  untouched.
 - **Phase 4 (flashcards + quiz) is DONE.** A "Practice" button on the saved-words list opens
   a session scoped to whatever book is currently filtered. Flashcards show one word at a
   time (tap to flip and reveal the meaning); quiz is multiple-choice, with the 3 wrong
