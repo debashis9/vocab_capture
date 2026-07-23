@@ -233,6 +233,27 @@
     .btn-save:hover { background: var(--oxblood-soft); }
     .btn-save.saved { border-color: var(--line); color: var(--ink-soft); }
 
+    /* Pick-one-sense card: shown when a lookup has more than one sense */
+    .senses-hint { color: var(--ink-soft); font-size: 14px; margin: 14px 0 0; }
+    .pos-group { margin-top: 22px; }
+    .sense-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+    .sense-item {
+      border: 1px solid var(--line); border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .sense-num { color: var(--oxblood); font-weight: 600; }
+    .sense-item .def { margin-top: 0; font-size: 15.5px; }
+    .sense-item .example { font-size: 14px; }
+    .sense-item .chips { margin-top: 10px; }
+    .sense-save-row { margin-top: 12px; display: flex; justify-content: flex-end; }
+    .btn-save-sense {
+      background: transparent; color: var(--oxblood);
+      border: 1.5px solid var(--oxblood); border-radius: 999px;
+      padding: 6px 14px; font-size: 13.5px;
+    }
+    .btn-save-sense:hover { background: var(--oxblood-soft); }
+    .btn-save-sense.saved { border-color: var(--line); color: var(--ink-soft); }
+
     .btn-ai {
       background: transparent; color: var(--ink-soft);
       border: 1.5px solid var(--line);
@@ -780,6 +801,14 @@
     }
 
     // Flatten the API's nested response into the fields we care about.
+    //
+    // Collects every sense across every part of speech into `senses`, in the order the
+    // API returned them, rather than just grabbing meanings[0]/definitions[0] — that
+    // used to silently pick whichever sense the API listed first regardless of how
+    // common or relevant it actually was (e.g. "incandescent" showed the rare noun
+    // sense "an incandescent lamp" instead of the everyday adjective meaning sitting
+    // right next to it). render() shows all of them when there's more than one, and the
+    // person looking the word up picks the one that fits.
     function pickBest(word, data) {
       const entry = Array.isArray(data) ? data[0] : data;
       // Wiktionary sometimes gives a shortened shared-prefix phonetic ending in "-/"
@@ -791,22 +820,38 @@
         phoneticCandidates.find(Boolean) || "";
       const audio = (entry.phonetics || []).map(p => p.audio).find(Boolean) || "";
 
-      const meaning = (entry.meanings || [])[0] || {};
-      const firstDef = (meaning.definitions || [])[0] || {};
+      const senses = [];
+      for (const meaning of entry.meanings || []) {
+        const pos = meaning.partOfSpeech || "";
+        for (const def of meaning.definitions || []) {
+          senses.push({
+            pos,
+            definition: def.definition || "No definition text was provided.",
+            example: def.example || "",
+            // Gather synonyms/antonyms from both the meaning level and the definition level.
+            synonyms: dedupe([...(meaning.synonyms||[]), ...(def.synonyms||[])]).slice(0,6),
+            antonyms: dedupe([...(meaning.antonyms||[]), ...(def.antonyms||[])]).slice(0,6),
+          });
+        }
+      }
+      if (!senses.length) {
+        senses.push({ pos: "", definition: "No definition text was provided.", example: "", synonyms: [], antonyms: [] });
+      }
 
-      // Gather synonyms/antonyms from both the meaning level and the definition level.
-      const syn = dedupe([...(meaning.synonyms||[]), ...(firstDef.synonyms||[])]).slice(0,6);
-      const ant = dedupe([...(meaning.antonyms||[]), ...(firstDef.antonyms||[])]).slice(0,6);
-
+      // Top-level pos/definition/etc mirror the first sense, so the single-sense
+      // rendering path and the AI path (which already picks one specific sense) don't
+      // need to know about `senses` at all.
+      const first = senses[0];
       return {
         word: entry.word || word,
         phonetic,
         audio,
-        pos: meaning.partOfSpeech || "",
-        definition: firstDef.definition || "No definition text was provided.",
-        example: firstDef.example || "",
-        synonyms: syn,
-        antonyms: ant,
+        senses,
+        pos: first.pos,
+        definition: first.definition,
+        example: first.example,
+        synonyms: first.synonyms,
+        antonyms: first.antonyms,
         source: "typed",
       };
     }
@@ -831,30 +876,80 @@
     // The word currently on screen, so the save button knows what to store.
     let currentResult = null;
 
+    // render() branches in two directions. A word with only one sense (or an
+    // AI-generated result, which already picked one specific sense) shows the
+    // original single-card view. A word with several senses across one or more parts
+    // of speech shows all of them, grouped by part of speech, each with its own "Save
+    // this sense" button — instead of silently saving whichever one happened to be
+    // listed first.
     function render(w) {
       currentResult = w;
       const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
+      const senses = w.senses || [{ pos: w.pos, definition: w.definition, example: w.example, synonyms: w.synonyms || [], antonyms: w.antonyms || [] }];
+
+      const pronunciation = `${
+        w.phonetic ? `<span class="phon">${escapeHtml(w.phonetic)}</span>` : ""
+      }${
+        w.audio ? `<button type="button" class="btn-audio" data-audio="${escapeHtml(w.audio)}" aria-label="Play pronunciation">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+        </button>` : ""
+      }`;
+
+      if (senses.length > 1) {
+        // Group indices by part of speech, preserving first-seen order (not
+        // alphabetical) so it still reads the way the dictionary presented it.
+        const order = [];
+        const byPos = new Map();
+        senses.forEach((s, i) => {
+          if (!byPos.has(s.pos)) { byPos.set(s.pos, []); order.push(s.pos); }
+          byPos.get(s.pos).push(i);
+        });
+
+        out.innerHTML = `
+          <article class="card">
+            <div class="headword">${escapeHtml(w.word)}</div>
+            ${pronunciation}
+            <p class="senses-hint">${senses.length} senses found${
+              order.length > 1 ? ` across ${order.length} parts of speech` : ""
+            } — save the one that fits.</p>
+            ${order.map(pos => `
+              <div class="pos-group">
+                ${ pos ? `<span class="pos">${escapeHtml(pos)}</span>` : "" }
+                <ol class="sense-list">
+                  ${byPos.get(pos).map((i, n) => {
+                    const s = senses[i];
+                    return `
+                    <li class="sense-item">
+                      <p class="def"><span class="sense-num">${n+1}.</span> ${escapeHtml(s.definition)}</p>
+                      ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
+                      ${ s.synonyms.length ? `<div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
+                      <div class="sense-save-row">
+                        <button type="button" class="btn-save-sense" data-sense-index="${i}">Save this sense</button>
+                      </div>
+                    </li>`;
+                  }).join("")}
+                </ol>
+              </div>`).join("")}
+          </article>`;
+        return;
+      }
+
+      const s = senses[0];
       out.innerHTML = `
         <article class="card">
           <div class="headword">${escapeHtml(w.word)}</div>
-          <span class="pos">${escapeHtml(w.pos)}</span>${
-            w.phonetic ? `<span class="phon">${escapeHtml(w.phonetic)}</span>` : ""
-          }${
-            w.audio ? `<button type="button" class="btn-audio" data-audio="${escapeHtml(w.audio)}" aria-label="Play pronunciation">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-              </svg>
-            </button>` : ""
-          }${
+          <span class="pos">${escapeHtml(s.pos)}</span>${pronunciation}${
             w.source === "ai" ? `<span class="ai-badge">AI-generated</span>` : ""
           }
-          <p class="def">${escapeHtml(w.definition)}</p>
-          ${ w.example ? `<p class="example">“${escapeHtml(w.example)}”</p>` : "" }
-          ${ w.synonyms.length ? `<p class="chips-label">Synonyms</p>
-             <div class="chips">${w.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
-          ${ w.antonyms.length ? `<p class="chips-label">Antonyms</p>
-             <div class="chips">${w.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
+          <p class="def">${escapeHtml(s.definition)}</p>
+          ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
+          ${ s.synonyms.length ? `<p class="chips-label">Synonyms</p>
+             <div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
+          ${ s.antonyms.length ? `<p class="chips-label">Antonyms</p>
+             <div class="chips">${s.antonyms.map(x=>chip(x,"ant")).join("")}</div>` : "" }
           <div class="save-row">
             ${ AI_ENABLED && w.source !== "ai"
               ? `<button id="ai-lookup" class="btn-ai" type="button">Get AI definition</button>`
@@ -905,6 +1000,39 @@
         btn.disabled = false;
         btn.textContent = "Couldn't save — try again";
         setTimeout(() => { btn.textContent = "Save to list"; }, 3000);
+      }
+    }
+
+    // Saves one specific sense out of the multi-sense picker in render(), instead of
+    // whatever currentResult.definition happened to default to.
+    async function saveSense(index) {
+      if (!currentResult || !currentResult.senses) return;
+      const sense = currentResult.senses[index];
+      if (!sense) return;
+
+      const btn = out.querySelector(`.btn-save-sense[data-sense-index="${index}"]`);
+      if (!btn || btn.disabled) return;
+
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      try {
+        await saveEntry({
+          word: currentResult.word,
+          meaning: sense.definition,
+          partOfSpeech: sense.pos,
+          synonyms: sense.synonyms,
+          antonyms: sense.antonyms,
+          example: sense.example,
+          book: $("book").value.trim(),
+          source: currentResult.source || "typed",
+        });
+        btn.textContent = "Saved ✓";
+        btn.classList.add("saved");
+        refreshSavedList();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Couldn't save — try again";
+        setTimeout(() => { btn.textContent = "Save this sense"; }, 3000);
       }
     }
 
@@ -1285,6 +1413,8 @@
       if (e.target.id === "ai-lookup") getAIDefinition();
       const audioBtn = e.target.closest(".btn-audio");
       if (audioBtn) new Audio(audioBtn.dataset.audio).play();
+      const saveSenseBtn = e.target.closest(".btn-save-sense");
+      if (saveSenseBtn) saveSense(Number(saveSenseBtn.dataset.senseIndex));
     });
 
     $("book-filter").addEventListener("change", (e) => {
