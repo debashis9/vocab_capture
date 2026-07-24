@@ -33,8 +33,8 @@ in a voice that could belong to it.
 1. `npm install` (needs Node 22+ — this repo pins it via `.nvmrc`; `nvm use` picks it up)
 2. Put your API key(s) in `.dev.vars` (git-ignored, never commit it):
    ```
-   ANTHROPIC_API_KEY=sk-ant-...
-   GEMINI_API_KEY=...
+   ANTHROPIC_API_KEY=<your-anthropic-key>
+   GEMINI_API_KEY=<your-gemini-key>
    ```
    Get a free Gemini key at `aistudio.google.com/apikey` — Google account, no credit card.
 3. `npm run dev` — runs the Worker at `http://localhost:8787`.
