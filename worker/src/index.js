@@ -26,8 +26,18 @@ archaic, still give your best accurate definition rather than saying you don't k
 
 export default {
   async fetch(request, env) {
+    // Allow the real GitHub Pages origin (env.ALLOWED_ORIGIN) always, plus
+    // any localhost origin so local dev/testing (gemma-test.html, wrangler
+    // dev) keeps working after this is deployed for real — CORS is a
+    // browser-only restriction, not a security boundary, so reflecting a
+    // localhost Origin back here doesn't expose anything a curl request
+    // couldn't already reach.
+    const requestOrigin = request.headers.get("Origin") || "";
+    const isLocalhost = /^https?:\/\/localhost(:\d+)?$/.test(requestOrigin);
+    const allowedOrigin = isLocalhost ? requestOrigin : (env.ALLOWED_ORIGIN || "*");
+
     const corsHeaders = {
-      "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
+      "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     };
