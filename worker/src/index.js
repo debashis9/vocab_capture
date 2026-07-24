@@ -24,6 +24,31 @@ that book. Keep the definition to one or two sentences and the example to one sh
 to 5 synonyms and up to 5 antonyms; use empty arrays if none fit naturally. If the word is obscure or \
 archaic, still give your best accurate definition rather than saying you don't know.`;
 
+// Same public values already embedded in index.html — not secrets (the anon
+// key is meant to be public; RLS/auth is what actually protects data, same
+// exception CLAUDE.md carves out for it elsewhere in this app).
+const SUPABASE_URL = "https://tnaifyahobaswxgervcy.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuYWlmeWFob2Jhc3d4Z2VydmN5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MzYzNTgsImV4cCI6MjEwMDIxMjM1OH0.9UCB6mYL99SK5Cq8EgDYYRT-oMGzedPIsGrLXXTrbbc";
+
+// Confirms the caller sent a live Supabase session, not just any bearer
+// token — delegates the actual JWT verification to Supabase's own
+// /auth/v1/user endpoint rather than reimplementing JWT signature checking
+// (algorithm, expiry, signing key) in the Worker. One extra round trip per
+// lookup; correctness over shaving latency here.
+async function verifySupabaseAuth(request) {
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return false;
+
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: SUPABASE_ANON_KEY,
+    },
+  });
+  return res.ok;
+}
+
 export default {
   async fetch(request, env) {
     // Allow the real GitHub Pages origin (env.ALLOWED_ORIGIN) always, plus
@@ -39,7 +64,9 @@ export default {
     const corsHeaders = {
       "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      // Authorization added so the browser's CORS preflight actually allows
+      // the bearer-token header the auth check below requires.
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
     };
 
     if (request.method === "OPTIONS") {
@@ -47,6 +74,13 @@ export default {
     }
     if (request.method !== "POST") {
       return json({ error: "Method not allowed" }, 405, corsHeaders);
+    }
+
+    // Require a live Supabase session before spending any quota (Gemini's
+    // free tier or the dormant Anthropic key) — without this, the URL alone
+    // was enough for anyone to call it, curl included.
+    if (!(await verifySupabaseAuth(request))) {
+      return json({ error: "Unauthorized" }, 401, corsHeaders);
     }
 
     let body;
