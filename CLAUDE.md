@@ -54,26 +54,31 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   you've already saved no longer merges the book into the existing row (the old IndexedDB
   version did) — it's a plain insert, so the same word saved from two books now makes two
   rows. Revisit if that's missed in practice.
-- Live and installed on Windows and Android; hosted via GitHub Pages. **Not yet pushed:**
-  all of Phase 2 (auth + Supabase storage) is committed locally on `main` but not pushed —
-  the live site still only has M0–M5 + Phase 4. See "Picking up next session" below.
+- Live and installed on Windows and Android; hosted via GitHub Pages, fully up to date with
+  `main` (last pushed 2026-07-23, includes Phase 2, the invite-only trigger, and multi-sense
+  lookup). SMTP: Gmail (debashis9@gmail.com + a Google App Password), not Resend — Resend
+  needs a verified domain to email anyone but the signup address itself, and buying one
+  solely to unblock it wasn't worth it for a personal/family-tester app.
 
 ## Picking up next session
-- **Phase 2 is fully verified end-to-end as of 2026-07-23.** Custom SMTP (Gmail, see below)
-  fixed the rate-limit block; signed in for real via magic link, saved a word, and confirmed
-  the row in the Supabase Table Editor with correct columns. The editor also showed **4 RLS
-  policies** active on `entries`, confirming RLS is actually enforcing (not just present) —
-  this had been the one thing a read-only anon-key probe couldn't distinguish earlier.
-- **SMTP decided: Gmail SMTP**, not Resend. Resend was picked first, then reversed on
-  finding out no domain is owned — Resend's sandbox mode can only email the signup address
-  itself, which doesn't work for family testers signing in with their own emails, and buying
-  a domain solely to unblock Resend wasn't worth it. Wired into Supabase → Authentication →
-  Emails → SMTP Settings using debashis9@gmail.com + a Google App Password. Revisit Resend
-  only if a real custom domain shows up for other reasons.
-- **README.md needs trimming** — flagged as having too much information. Hold off on a
-  rewrite until there's time to review what actually stays; don't do this unsupervised.
-- **Pushed to `origin/main` on 2026-07-23.** Phase 2 (auth + Supabase storage + the
-  invite-only trigger) is now live on GitHub Pages, not just committed locally.
+- **Decided: not swapping the dictionary API source, for now.** Looked at
+  freedictionaryapi.com (same Wiktionary data as today, no key, better-structured response)
+  and Wordnik (genuinely different curated sources — AHD, Century, WordNet — needs a free
+  API key) as alternatives to the current dictionaryapi.dev, prompted by a real quality
+  complaint ("incandescent" showing a nonsensical definition). Root cause turned out to be
+  an app-side bug (grabbing `meanings[0]` regardless of part of speech), not the API itself —
+  fixed by the multi-sense picker above. With that fixed, swapping sources isn't worth the
+  effort right now. Revisit only if sense quality is still a complaint after using
+  multi-sense for a while; Merriam-Webster stays reserved for if/when this goes fully public.
+- **Open bug: magic-link sign-in fails for a second (non-owner) email**, `ERR_CONNECTION_RESET`
+  in the browser right after clicking the link, on the live GitHub Pages site. Ruled out:
+  the Redirect URLs config (has an exact, non-wildcard entry for the live origin) and
+  `allowed_emails` (that email is already on it). Suspect network-layer, not app
+  config — clicking a Supabase magic link hits Supabase's own `/auth/v1/verify` endpoint
+  first, before ever reaching this app, so a reset there could be a firewall/antivirus on the
+  other person's device/network, or their email client's link-scanning proxy, rather than
+  anything wrong with this repo. **Deferred until the other person is around in person to
+  test together** — no fix attempted yet, don't guess further without them present.
 
 ## Architecture (hold to these)
 - **One file:** the whole app lives in `index.html` (HTML + CSS + JS inline), kept readable
