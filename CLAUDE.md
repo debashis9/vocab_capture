@@ -13,10 +13,32 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   than queueing/retrying failed lookups — lookups are inherently online-only, so this was
   scoped down from "offline queueing"), an in-app install button (`beforeinstallprompt`),
   and a dark theme via `prefers-color-scheme` that keeps the warm-paper/oxblood identity.
-- M4's LLM proxy (`worker/`) and its frontend button are built and locally tested, but
-  intentionally left off (`AI_ENABLED = false`) — activation is deferred until there's a
-  revenue-backed plan for the ongoing API cost, since it's billed separately from any
-  Claude.ai subscription.
+- **M4 is DONE and live as of 2026-07-24** — backed by Gemma 4 (26B MoE, `gemma-4-26b-a4b-it`)
+  via Google's free-tier Gemini API, not Claude Haiku as originally planned. The Cloudflare
+  Worker (`worker/`) is deployed at `https://margin-llm-proxy.debashis9.workers.dev`, with
+  `GEMINI_API_KEY` stored as a Worker secret (never in this repo) and `ALLOWED_ORIGIN` set to
+  the live GitHub Pages origin. `AI_ENABLED = true`. UI: a Dictionary/AI toggle at the top of
+  the result card — Dictionary shows by default (unchanged, including the multi-sense
+  picker); switching to AI lazily fetches a Gemma-generated, book-context-aware definition
+  the first time it's opened for that word (not on every lookup), then caches it so
+  switching back and forth afterward is instant. Both tabs have their own independent "Save
+  to list" button (`saveEntry`/`saveAIResult`), and the app's own `.card` element is reused
+  across tab switches (not rebuilt) so the CSS entrance animation doesn't retrigger on every
+  click. The originally-planned Claude Haiku path (`/define` on the same Worker) still
+  exists in code but the Anthropic key backing it has zero credits — effectively unused;
+  Gemma won on cost (free vs ~$0.0015/lookup) after a deliberate latency-tuning pass (see
+  below) closed the gap that made it look impractical at first.
+- **Gemma 4 latency was tuned down ~6x before shipping.** An unoptimized request (full
+  prompt, default thinking, non-streaming) took ~19s and burned 770 tokens on internal
+  reasoning versus 78 on the actual answer. Fixed via `generationConfig.thinkingConfig:
+  {thinkingLevel: "minimal"}` (verified live — `thinkingBudget: 0`, which works on other
+  Gemini models, is flatly rejected for Gemma 4), `maxOutputTokens: 300`, a trimmed
+  Gemma-only system prompt (separate from the Claude path's, which doesn't need
+  JSON-formatting instructions since Anthropic's structured outputs feature guarantees the
+  shape), and switching from a blocking `generateContent` call to `streamGenerateContent`
+  so time-to-first-token is observable at all. Result: ~2.8-3.2s total, ~1.2-1.5s to first
+  token. One real bug hit along the way: this API's SSE stream uses `\r\n` line endings, not
+  `\n` — a naive frame parser silently produces no output without that fix.
 - **Multi-sense lookup, done 2026-07-23.** `pickBest()` used to grab only the free
   dictionary's `meanings[0]`/`definitions[0]`, silently dropping every other sense — e.g.
   "incandescent" showed the rare noun sense ("an incandescent lamp or bulb") instead of the
@@ -91,7 +113,9 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   cache the Supabase CDN script, and saved words now live entirely in Supabase (no local
   fallback since storage moved off IndexedDB) — opening the app fully offline will fail
   until Phase 2b addresses this. Not fixed yet, flagged for later.
-- **Lookups:** currently the free dictionaryapi.dev API (no key). An LLM upgrade comes later.
+- **Lookups:** the free dictionaryapi.dev API (no key) is still the default/Dictionary tab.
+  The AI tab is Gemma 4 via Google's Gemini API, called through the Cloudflare Worker — see
+  M4 in Current state above.
 
 ## Rules that protect future phases — do not break
 1. **Wrap all persistence in a small storage module** (`saveEntry`, `getEntries`,
@@ -111,12 +135,8 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 - M2: save lookups to IndexedDB via the storage module; a saved list that loads on open,
   filters by book, and supports delete. DONE.
 - M3: voice input (mic button, Web Speech API). DONE.
-- **M4: built but dormant.** A Cloudflare Worker proxy (`worker/`) calls Claude Haiku 4.5
-  for a book-context-aware AI definition, and the frontend has a "Get AI definition"
-  button — but it's feature-flagged off (`AI_ENABLED = false` in `index.html`) because
-  the API key needs its own separate billing (not covered by a Claude.ai subscription).
-  Decision: hold off until scaling to a wider audience with a revenue model in place, then
-  flip the flag and deploy the Worker. See `worker/README.md` for activation steps.
+- **M4: DONE** — live via Gemma 4 (free tier), not Claude Haiku as originally planned. See
+  Current state above for the full picture and `worker/README.md` for the deployed setup.
 - M5: polish (offline-aware error message, install prompt, dark theme). DONE.
 - **Phase 4: flashcards + quiz, scoped to the current book filter. DONE** (see Current state
   above for details). Client-side only — no auth needed, which is why this went ahead of

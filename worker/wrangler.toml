@@ -7,7 +7,7 @@ compatibility_date = "2026-07-01"
 # Before deploying for real, set this to your actual GitHub Pages origin,
 # e.g. "https://<you>.github.io" (no trailing slash, no path).
 [vars]
-ALLOWED_ORIGIN = "http://localhost:8000"
+ALLOWED_ORIGIN = "https://debashis9.github.io"
 
-# ANTHROPIC_API_KEY is a secret, not a var — it's never written to this file.
-# Local dev: put it in .dev.vars (git-ignored). Production: `wrangler secret put ANTHROPIC_API_KEY`.
+# ANTHROPIC_API_KEY and GEMINI_API_KEY are secrets, not vars — never written to this file.
+# Local dev: put them in .dev.vars (git-ignored). Production: `wrangler secret put <NAME>`.
