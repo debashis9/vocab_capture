@@ -1,46 +1,57 @@
 # Margin LLM proxy (M4)
 
-A small Cloudflare Worker that holds the Anthropic API key server-side and generates
-AI-upgraded word definitions with Claude Haiku 4.5. It exists so the key never has to sit
-in `index.html`'s JavaScript, where anyone could read it from dev tools.
+A small Cloudflare Worker that holds API keys server-side and generates AI-upgraded word
+definitions. It exists so the keys never have to sit in `index.html`'s JavaScript, where
+anyone could read them from dev tools.
 
-**Status: built and locally tested, but dormant.** The frontend button is feature-flagged
-off (`AI_ENABLED = false` in `../index.html`) because API usage is billed separately from
-any Claude.ai subscription, and we decided to hold off on that ongoing cost until there's a
-reason to scale past personal use.
+**Status: live**, deployed at `https://margin-llm-proxy.debashis9.workers.dev`. The app's
+"AI" tab (`AI_ENABLED = true` in `../index.html`) calls this Worker's `/define-gemma` route,
+which uses Gemma 4 (26B MoE, `gemma-4-26b-a4b-it`) via Google's free-tier Gemini API — not
+Claude Haiku as originally planned here, since Gemma is genuinely free at this scale and,
+after a latency-tuning pass, fast enough (~2.8-3.2s total, ~1.2-1.5s to first token).
 
-## What it does
+## Routes
 
-`POST /define` with `{ "word": "...", "book": "..." }` (book is optional) returns a
-definition in the same shape the free-dictionary path already produces — `word, pos,
-definition, example, synonyms, antonyms` — so the app's existing card renderer and save
-logic don't need to know which source it came from. If a book title is given, the prompt
-asks Claude to prefer the sense of the word that fits that kind of book, and to write the
-example sentence in a voice that could belong to it.
+Both return the same shape — `word, pos, definition, example, synonyms, antonyms` — so the
+app's card renderer and save logic don't need to know which source produced it. Both accept
+`POST { "word": "...", "book": "..." }` (book is optional); if given, the model is asked to
+prefer the sense of the word that fits that kind of book and to write the example sentence
+in a voice that could belong to it.
+
+- **`/define-gemma`** — the live path. Also accepts `"model": "26b" | "31b"` (defaults to
+  `26b`); the 31B Dense variant was tested and works but wasn't meaningfully better for this
+  task in side-by-side comparison, so 26B stayed the default. Response includes a `_timing:
+  {ttft_ms, total_ms}` field for observability — harmless to ignore, the frontend doesn't
+  use it.
+- **`/define`** — the original Claude Haiku 4.5 path. Still in the code, but the
+  `ANTHROPIC_API_KEY` behind it currently has zero credits, so this route 400s in practice.
+  Kept rather than deleted in case Gemma's free tier or quality ever changes and this needs
+  revisiting.
 
 ## Local testing
 
 1. `npm install` (needs Node 22+ — this repo pins it via `.nvmrc`; `nvm use` picks it up)
-2. Put your Anthropic API key in `.dev.vars` (git-ignored, never commit it):
+2. Put your API key(s) in `.dev.vars` (git-ignored, never commit it):
    ```
    ANTHROPIC_API_KEY=sk-ant-...
+   GEMINI_API_KEY=...
    ```
-3. `npm run dev` — runs the Worker at `http://localhost:8787`, matching the
-   `AI_ENDPOINT` constant already in `index.html`.
-4. Serve the app itself (`python3 -m http.server 8000` from the repo root) and flip
-   `AI_ENABLED` to `true` locally (don't commit that flip) to see the button.
+   Get a free Gemini key at `aistudio.google.com/apikey` — Google account, no credit card.
+3. `npm run dev` — runs the Worker at `http://localhost:8787`.
+4. Serve the app itself (`python3 -m http.server 8000` from the repo root); `AI_ENDPOINT` in
+   `index.html` points at the deployed Worker by default — repoint it at
+   `http://localhost:8787/define-gemma` locally if you want to test against a local Worker
+   instead of the live one.
 
-## Activating it for real
+## Redeploying after a code change
 
-1. Add credits to the Anthropic Console account this key belongs to (Plans & Billing) —
-   API usage is pay-as-you-go, separate from any Claude.ai subscription. At the estimated
-   cost per lookup (~$0.0015), this is a small amount even for regular personal use.
-2. Deploy: `npx wrangler login` (once), then `npm run deploy`.
-3. Store the real key as a Cloudflare secret, not in a file:
-   `npx wrangler secret put ANTHROPIC_API_KEY`
-4. In `wrangler.toml`, set `ALLOWED_ORIGIN` to your actual GitHub Pages origin (e.g.
-   `https://<you>.github.io`, no trailing slash) so only your app can call the proxy.
-5. In `index.html`, update `AI_ENDPOINT` to the deployed Worker's URL and flip
-   `AI_ENABLED` to `true`.
-6. If opening this up beyond friends/family, add rate limiting on the Worker — right now
-   anyone with the deployed URL could call it and run up the bill.
+1. `npx wrangler login` (once per machine — opens a browser to authorize; the local process
+   started by this command has to still be running when you click "Authorize" in the
+   browser, so do it in one continuous sitting rather than pausing partway through).
+2. `npm run deploy`.
+3. Secrets and `wrangler.toml`'s `ALLOWED_ORIGIN` (set to the live GitHub Pages origin) are
+   already configured on the deployed Worker — only re-run `wrangler secret put <NAME>` if a
+   key itself changes, not on every code deploy.
+4. If opening this up beyond friends/family, add rate limiting on the Worker — right now
+   anyone with the deployed URL could call it. Not a cost risk with Gemma's free tier the
+   way it would have been with a paid Claude key, but still worth doing before wider use.
