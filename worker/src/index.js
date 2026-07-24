@@ -105,17 +105,29 @@ const GEMMA_MODELS = {
   "31b": "gemma-4-31b-it",
 };
 
+// Deliberately separate from the Claude path's SYSTEM_PROMPT (which doesn't
+// need JSON-formatting instructions at all, since Anthropic's structured
+// outputs feature guarantees the shape) — trimmed to the minimum that still
+// reliably produces strict JSON: the book-context rule, output limits, and
+// the exact schema. Dropped the persona framing and the
+// obscure/archaic-word fallback clause since testing showed both were
+// unnecessary for this model to behave correctly.
+const GEMMA_SYSTEM_PROMPT = `Define the given word in 1-2 sentences, with one short example sentence. \
+If a book is given, fit the sense and example to that book's context. Up to 5 synonyms, up to 5 \
+antonyms (empty arrays if none fit). Output ONLY this JSON, no markdown fences, no other text: \
+{"word": string, "pos": string, "definition": string, "example": string, "synonyms": string[], "antonyms": string[]}`;
+
+// Verified directly against the live API (thinkingBudget: 0 is rejected
+// outright with "Thinking budget is not supported for this model" — 400).
+// thinkingLevel: "minimal" is the real, documented lever for this model
+// family and cut a ~12-15s response to ~3.8s in testing.
 async function lookupGemma(word, book, userMessage, env, modelKey) {
   const model = GEMMA_MODELS[modelKey] || GEMMA_MODELS["26b"];
-  const prompt = `${SYSTEM_PROMPT}
+  const prompt = `${GEMMA_SYSTEM_PROMPT}\n\n${userMessage}`;
 
-Respond with ONLY a JSON object — no markdown code fences, no commentary before or after — matching exactly this shape:
-{"word": string, "pos": string, "definition": string, "example": string, "synonyms": string[], "antonyms": string[]}
-
-${userMessage}`;
-
+  const startedAt = Date.now();
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
     {
       method: "POST",
       headers: {
@@ -124,6 +136,10 @@ ${userMessage}`;
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          thinkingConfig: { thinkingLevel: "minimal" },
+          maxOutputTokens: 300,
+        },
       }),
     }
   );
@@ -132,16 +148,54 @@ ${userMessage}`;
     throw new Error(`Gemini API HTTP ${res.status}: ${await res.text()}`);
   }
 
-  const data = await res.json();
-  // Gemma 4 returns thinking as a separate part with `thought: true` ahead of
-  // the real answer — grabbing parts[0] unconditionally picks up the
-  // reasoning scratchpad instead of the final JSON. Skip thought parts.
-  const parts = data.candidates?.[0]?.content?.parts || [];
-  const rawText = parts.find((p) => !p.thought)?.text;
-  if (!rawText) throw new Error("No answer text in Gemma response: " + JSON.stringify(data));
+  // Streaming (rather than a single generateContent call) is what makes
+  // time-to-first-token observable at all — a blocking call only ever gives
+  // you a single end-to-end duration, with no way to separate "waiting for
+  // the model to start" from "waiting for it to finish."
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let fullText = "";
+  let firstTokenAt = null;
 
-  const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  return { ...JSON.parse(cleaned), word };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    // This API's SSE stream uses \r\n line endings, not \n — normalize so
+    // the \n\n frame-boundary search below actually matches. Without this,
+    // no frame ever splits out (indexOf("\n\n") never finds "\r\n\r\n") and
+    // the whole response silently fails to parse.
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+
+    // SSE frames are blank-line-separated; each frame's payload line is
+    // prefixed "data: ".
+    let sep;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+      if (!dataLine) continue;
+      const jsonStr = dataLine.slice(5).trim();
+      if (!jsonStr) continue;
+
+      const chunk = JSON.parse(jsonStr);
+      const part = chunk.candidates?.[0]?.content?.parts?.[0];
+      // Skip thought parts (still present even at "minimal") — only the
+      // real answer text counts as "the first token" for this measurement.
+      if (part && !part.thought && part.text) {
+        if (firstTokenAt === null) firstTokenAt = Date.now();
+        fullText += part.text;
+      }
+    }
+  }
+
+  const totalMs = Date.now() - startedAt;
+  const ttftMs = firstTokenAt !== null ? firstTokenAt - startedAt : totalMs;
+
+  if (!fullText) throw new Error("No answer text in Gemma stream");
+
+  const cleaned = fullText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  return { ...JSON.parse(cleaned), word, _timing: { ttft_ms: ttftMs, total_ms: totalMs } };
 }
 
 function json(data, status, headers) {

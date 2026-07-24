@@ -46,6 +46,7 @@
     // Starts the instant "Look up" is clicked; updates live while waiting;
     // freezes at the final elapsed time once the result is shown.
     const start = performance.now();
+    let data = null;
     const tick = setInterval(() => {
       timer.textContent = `${((performance.now() - start) / 1000).toFixed(1)}s…`;
     }, 100);
@@ -56,7 +57,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ word: w, book: book.value.trim(), model: model.value }),
       });
-      const data = await res.json();
+      data = await res.json();
       out.textContent = JSON.stringify(data, null, 2);
       out.className = data.error ? "error" : "";
     } catch (err) {
@@ -64,7 +65,11 @@
       out.className = "error";
     } finally {
       clearInterval(tick);
-      timer.textContent = `Took ${((performance.now() - start) / 1000).toFixed(1)}s`;
+      const roundTrip = ((performance.now() - start) / 1000).toFixed(1);
+      const t = data && data._timing;
+      timer.textContent = t
+        ? `Round-trip ${roundTrip}s  (server: time-to-first-token ${(t.ttft_ms / 1000).toFixed(1)}s, total ${(t.total_ms / 1000).toFixed(1)}s)`
+        : `Round-trip ${roundTrip}s`;
       go.disabled = false;
     }
   }
