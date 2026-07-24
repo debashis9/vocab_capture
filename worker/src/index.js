@@ -63,15 +63,23 @@ export default {
     const book = (body.book || "").trim();
     const userMessage = book ? `Word: "${word}"\nBook: "${book}"` : `Word: "${word}"`;
 
-    // EXPERIMENT (gemma-definitions branch): /define still uses Claude Haiku
-    // unchanged. /define-gemma is a parallel path hitting Google's free Gemma 4
-    // API, for side-by-side quality comparison before deciding whether to
-    // switch. Not wired into the frontend — curl it directly for now.
+    // /define-gemma is the live path (Gemma 4, free tier). /define is the
+    // original Claude Haiku path -- kept in code but effectively dormant,
+    // since its ANTHROPIC_API_KEY was never set as a secret on the deployed
+    // Worker (only GEMINI_API_KEY was). Any other path is a real 404, not a
+    // silent fall-through to /define -- that used to be the behavior here,
+    // and it's exactly what turned "wrong URL" into a confusing Anthropic
+    // SDK credential error instead of an obvious "not found."
     const url = new URL(request.url);
+    let definition;
     try {
-      const definition = url.pathname === "/define-gemma"
-        ? await lookupGemma(word, book, userMessage, env, body.model)
-        : await lookupClaude(userMessage, env);
+      if (url.pathname === "/define-gemma") {
+        definition = await lookupGemma(word, book, userMessage, env, body.model);
+      } else if (url.pathname === "/define") {
+        definition = await lookupClaude(userMessage, env);
+      } else {
+        return json({ error: "Not found. Use /define-gemma or /define." }, 404, corsHeaders);
+      }
       return json(definition, 200, corsHeaders);
     } catch (err) {
       return json({ error: "Lookup failed", detail: String(err) }, 502, corsHeaders);
