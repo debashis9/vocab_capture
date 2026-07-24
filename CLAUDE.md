@@ -108,15 +108,30 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   fixed by the multi-sense picker above. With that fixed, swapping sources isn't worth the
   effort right now. Revisit only if sense quality is still a complaint after using
   multi-sense for a while; Merriam-Webster stays reserved for if/when this goes fully public.
-- **Open bug: magic-link sign-in fails for a second (non-owner) email**, `ERR_CONNECTION_RESET`
-  in the browser right after clicking the link, on the live GitHub Pages site. Ruled out:
-  the Redirect URLs config (has an exact, non-wildcard entry for the live origin) and
-  `allowed_emails` (that email is already on it). Suspect network-layer, not app
-  config — clicking a Supabase magic link hits Supabase's own `/auth/v1/verify` endpoint
-  first, before ever reaching this app, so a reset there could be a firewall/antivirus on the
-  other person's device/network, or their email client's link-scanning proxy, rather than
-  anything wrong with this repo. **Deferred until the other person is around in person to
-  test together** — no fix attempted yet, don't guess further without them present.
+- **RESOLVED as of 2026-07-24: the second-user magic-link sign-in issue.** The earlier
+  `ERR_CONNECTION_RESET` (see prior notes, since removed) didn't recur — confirmed by a real
+  second user successfully signing in and saving a word: a distinct `user_id` UUID (not
+  debashis9's) now shows up in the Supabase `entries` table. Whatever caused the one-off
+  reset was most likely on that person's device/network, not this app, matching the original
+  suspicion. No code or config change was needed.
+
+## To-do
+- **Polish the sign-in email template.** New/invited users currently get Supabase's default,
+  generic magic-link email. Worth customizing (Supabase → Authentication → Emails →
+  Templates) to feel less like a raw system email and more in keeping with the app's actual
+  identity — at minimum clearer copy for a first-time recipient who has no context, ideally
+  some visual match to the warm-paper/oxblood look. Not started; no design decided yet.
+- **Phase 2b (offline caching / local-first sync).** Not started. The app currently can't
+  open at all without a network connection — no local fallback since storage moved to
+  Supabase. The old IndexedDB code (`saveEntryLocal`/`getEntriesLocal`/`deleteEntryLocal`)
+  is kept around unused specifically for this.
+- **Worker rate limiting.** Flagged when the Worker had no auth check at all; matters less
+  now that every request needs a real signed-in Supabase session (see M4 above), but still
+  not there as defense-in-depth against a compromised or overly-eager signed-in account.
+- **Revisit if it comes up in practice:** Phase 2's plain-insert save no longer merges a
+  word you've already saved into the existing row across books the way the old IndexedDB
+  version did — same word from two books now makes two rows. Not fixed since it hasn't
+  actually been a problem yet.
 
 ## Architecture (hold to these)
 - **One file:** the whole app lives in `index.html` (HTML + CSS + JS inline), kept readable
