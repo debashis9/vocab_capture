@@ -878,10 +878,16 @@
     // Asks the LLM proxy for a definition, tagged to the book for context-aware
     // sense selection. Returns the same shape as pickBest() so render() and
     // saveCurrentResult() don't need to know which source produced the result.
+    // The Worker requires a live Supabase session (see verifySupabaseAuth()
+    // there) — without this header it correctly rejects with 401, since the
+    // AI tab is only ever reachable while signed in anyway.
     async function lookupAI(word, book) {
       const res = await fetch(AI_ENDPOINT, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + currentSession.access_token,
+        },
         body: JSON.stringify({ word, book }),
       });
       if (!res.ok) {
