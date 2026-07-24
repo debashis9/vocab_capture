@@ -28,6 +28,20 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   exists in code but the Anthropic key backing it has zero credits — effectively unused;
   Gemma won on cost (free vs ~$0.0015/lookup) after a deliberate latency-tuning pass (see
   below) closed the gap that made it look impractical at first.
+- **The Worker requires a live Supabase session — no open endpoint.** Both `/define-gemma`
+  and `/define` (and any unrecognized path) reject with 401 unless the request carries a real
+  `Authorization: Bearer <supabase-access-token>`, verified by calling Supabase's own
+  `/auth/v1/user` endpoint (`verifySupabaseAuth()` — deliberately not reimplementing JWT
+  signature checking in the Worker). This was added after finding the endpoint had no auth
+  check at all — a bare curl returned a real definition, meaning anyone with the URL
+  (published in `index.html`'s public source) could spend Gemini quota. Not a cost risk today
+  since Gemma's free tier has no paid tier and the Claude key is unfunded, but a real
+  availability risk (`*.workers.dev` subdomains do get hit by automated scanners) and would
+  become a real cost risk the moment either backing key is ever paid. `index.html`'s
+  `lookupAI()` sends `currentSession.access_token` as the bearer token. Also fixed in the
+  same pass: unrecognized paths used to silently fall through to the (unfunded) Claude
+  path instead of 404ing, which is what turned a plain wrong-URL curl test into a confusing
+  "could not resolve authentication method" Anthropic SDK error.
 - **Gemma 4 latency was tuned down ~6x before shipping.** An unoptimized request (full
   prompt, default thinking, non-streaming) took ~19s and burned 770 tokens on internal
   reasoning versus 78 on the actual answer. Fixed via `generationConfig.thinkingConfig:
@@ -77,10 +91,12 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   version did) — it's a plain insert, so the same word saved from two books now makes two
   rows. Revisit if that's missed in practice.
 - Live and installed on Windows and Android; hosted via GitHub Pages, fully up to date with
-  `main` (last pushed 2026-07-23, includes Phase 2, the invite-only trigger, and multi-sense
-  lookup). SMTP: Gmail (debashis9@gmail.com + a Google App Password), not Resend — Resend
-  needs a verified domain to email anyone but the signup address itself, and buying one
-  solely to unblock it wasn't worth it for a personal/family-tester app.
+  `main` (last pushed 2026-07-24, includes M4/Gemma, the Worker auth requirement, and the
+  `sw.js` v17 bump — remember to hard-refresh/unregister-and-reload an already-installed copy
+  to actually see it, per the PWA note above). SMTP: Gmail (debashis9@gmail.com + a Google
+  App Password), not Resend — Resend needs a verified domain to email anyone but the signup
+  address itself, and buying one solely to unblock it wasn't worth it for a
+  personal/family-tester app.
 
 ## Picking up next session
 - **Decided: not swapping the dictionary API source, for now.** Looked at
@@ -113,6 +129,16 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   cache the Supabase CDN script, and saved words now live entirely in Supabase (no local
   fallback since storage moved off IndexedDB) — opening the app fully offline will fail
   until Phase 2b addresses this. Not fixed yet, flagged for later.
+- **Bump `sw.js`'s `CACHE` version constant whenever `index.html` (or `manifest.json`/icons)
+  changes.** The service worker caches `./index.html` itself as part of the app shell — a
+  real browser with an existing registration keeps serving whatever was cached under the old
+  version string until it changes, even across multiple unrelated code changes and reloads
+  (a DevTools "Update on reload" checkbox isn't reliably enough by itself; the sure fix is
+  unregistering the old worker + clearing site storage). This bit on 2026-07-24: several
+  rounds of `index.html` changes (multi-sense picker, then the AI toggle) shipped without
+  bumping `v16`, so a real signed-in browser kept showing the pre-multi-sense, pre-AI-toggle
+  card the whole time — automated testing never caught it because a fresh Playwright context
+  has no prior service worker registration to go stale.
 - **Lookups:** the free dictionaryapi.dev API (no key) is still the default/Dictionary tab.
   The AI tab is Gemma 4 via Google's Gemini API, called through the Cloudflare Worker — see
   M4 in Current state above.
