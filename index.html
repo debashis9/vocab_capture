@@ -267,6 +267,24 @@
       padding: 2px 8px; margin-left: 8px; vertical-align: 2px;
     }
 
+    /* Dictionary/AI source toggle: dictionary shows by default, AI is
+       fetched lazily the first time its tab is opened. */
+    .source-toggle {
+      display: flex; gap: 6px; margin-top: 16px;
+      border-bottom: 1px solid var(--line); padding-bottom: 10px;
+    }
+    .source-toggle button {
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line); border-radius: 999px;
+      padding: 6px 16px; font-size: 13.5px;
+    }
+    .source-toggle button:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
+    .source-toggle button.active {
+      background: var(--oxblood); color: var(--on-oxblood); border-color: var(--oxblood);
+    }
+    .source-toggle button.active:hover { background: var(--oxblood-hover); color: var(--on-oxblood); }
+    #tab-body { margin-top: 4px; }
+
     .foot { margin-top: 30px; color: var(--ink-soft); font-size: 13px; text-align: center; }
     .foot code { background: var(--paper-2); padding: 1px 6px; border-radius: 5px; }
 
@@ -578,11 +596,12 @@
 
     $("sign-out").addEventListener("click", () => sb.auth.signOut());
 
-    // ---------- AI definitions (M4, dormant by default) ----------
-    // Flip to true once the LLM proxy is deployed and its API billing is set up.
-    // AI_ENDPOINT should point at the deployed Cloudflare Worker (see worker/).
-    const AI_ENABLED = false;
-    const AI_ENDPOINT = "http://localhost:8787/define";
+    // ---------- AI definitions (M4, live as of 2026-07-24) ----------
+    // Backed by Gemma 4 (free tier, via Google's Gemini API) rather than
+    // Claude Haiku — see worker/src/index.js's /define-gemma route and
+    // CLAUDE.md for why. Deployed Worker, not local dev.
+    const AI_ENABLED = true;
+    const AI_ENDPOINT = "https://margin-llm-proxy.debashis9.workers.dev/define-gemma";
 
     // Remember the current book between sessions (simple key/value, not the word list).
     const BOOK_KEY = "margin.book";
@@ -873,20 +892,35 @@
       return { ...data, phonetic: "", audio: "", source: "ai" };
     }
 
-    // The word currently on screen, so the save button knows what to store.
+    // The dictionary word currently on screen. Always the free-dictionary
+    // result — the AI result lives separately in aiResult so switching tabs
+    // never loses either one.
     let currentResult = null;
+    // AI tab state, reset on every new lookup. Nothing is fetched from the
+    // Worker until the AI tab is actually opened for this word.
+    let aiResult = null;
+    let aiLoading = false;
+    let aiError = null;
+    let activeTab = "dictionary";
 
-    // render() branches in two directions. A word with only one sense (or an
-    // AI-generated result, which already picked one specific sense) shows the
-    // original single-card view. A word with several senses across one or more parts
-    // of speech shows all of them, grouped by part of speech, each with its own "Save
-    // this sense" button — instead of silently saving whichever one happened to be
-    // listed first.
+    // Called once per fresh lookup with the dictionary result. Resets the AI
+    // tab state (a new word means a new, not-yet-fetched AI definition) and
+    // draws the card starting on the dictionary tab.
     function render(w) {
       currentResult = w;
-      const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
-      const senses = w.senses || [{ pos: w.pos, definition: w.definition, example: w.example, synonyms: w.synonyms || [], antonyms: w.antonyms || [] }];
+      aiResult = null;
+      aiLoading = false;
+      aiError = null;
+      activeTab = "dictionary";
+      renderCard();
+    }
 
+    // Rebuilds the whole card from current state — currentResult plus
+    // whichever of the dictionary/AI tab bodies is active. Called on every
+    // state change (tab switch, AI fetch start/finish) instead of render(),
+    // which would wrongly reset the AI cache.
+    function renderCard() {
+      const w = currentResult;
       const pronunciation = `${
         w.phonetic ? `<span class="phon">${escapeHtml(w.phonetic)}</span>` : ""
       }${
@@ -898,6 +932,43 @@
         </button>` : ""
       }`;
 
+      const toggle = AI_ENABLED ? `
+        <div class="source-toggle" role="tablist">
+          <button type="button" class="${activeTab === "dictionary" ? "active" : ""}" data-tab="dictionary">Dictionary</button>
+          <button type="button" class="${activeTab === "ai" ? "active" : ""}" data-tab="ai">AI</button>
+        </div>` : "";
+
+      out.innerHTML = `
+        <article class="card">
+          <div class="headword">${escapeHtml(w.word)}</div>
+          ${pronunciation}
+          ${toggle}
+          <div id="tab-body">${activeTab === "ai" ? renderAIBody() : renderDictionaryBody(w)}</div>
+        </article>`;
+    }
+
+    // Used for every state change *after* the initial renderCard() call —
+    // tab switches, AI loading/result/error. Only swaps #tab-body's content
+    // and the toggle buttons' active class, rather than rebuilding the
+    // whole <article class="card">. Rebuilding the full card on every tab
+    // click would retrigger its CSS entrance animation (a fade + slide-up)
+    // each time, which reads as flicker on something that should feel like
+    // an instant, stable toggle — not "new content arriving."
+    function updateTabBody() {
+      const tabButtons = document.querySelectorAll(".source-toggle button");
+      tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === activeTab));
+      const body = document.getElementById("tab-body");
+      if (body) body.innerHTML = activeTab === "ai" ? renderAIBody() : renderDictionaryBody(currentResult);
+    }
+
+    // Dictionary tab body. Branches on sense count the same way the
+    // original single-card render() used to: one sense (or a word with no
+    // real alternatives) gets a plain "Save to list" button; several senses
+    // get the pick-one-to-save list, grouped by part of speech.
+    function renderDictionaryBody(w) {
+      const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
+      const senses = w.senses || [{ pos: w.pos, definition: w.definition, example: w.example, synonyms: w.synonyms || [], antonyms: w.antonyms || [] }];
+
       if (senses.length > 1) {
         // Group indices by part of speech, preserving first-seen order (not
         // alphabetical) so it still reads the way the dictionary presented it.
@@ -908,70 +979,125 @@
           byPos.get(s.pos).push(i);
         });
 
-        out.innerHTML = `
-          <article class="card">
-            <div class="headword">${escapeHtml(w.word)}</div>
-            ${pronunciation}
-            <p class="senses-hint">${senses.length} senses found${
-              order.length > 1 ? ` across ${order.length} parts of speech` : ""
-            } — save the one that fits.</p>
-            ${order.map(pos => `
-              <div class="pos-group">
-                ${ pos ? `<span class="pos">${escapeHtml(pos)}</span>` : "" }
-                <ol class="sense-list">
-                  ${byPos.get(pos).map((i, n) => {
-                    const s = senses[i];
-                    return `
-                    <li class="sense-item">
-                      <p class="def"><span class="sense-num">${n+1}.</span> ${escapeHtml(s.definition)}</p>
-                      ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
-                      ${ s.synonyms.length ? `<div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
-                      <div class="sense-save-row">
-                        <button type="button" class="btn-save-sense" data-sense-index="${i}">Save this sense</button>
-                      </div>
-                    </li>`;
-                  }).join("")}
-                </ol>
-              </div>`).join("")}
-          </article>`;
-        return;
+        return `
+          <p class="senses-hint">${senses.length} senses found${
+            order.length > 1 ? ` across ${order.length} parts of speech` : ""
+          } — save the one that fits.</p>
+          ${order.map(pos => `
+            <div class="pos-group">
+              ${ pos ? `<span class="pos">${escapeHtml(pos)}</span>` : "" }
+              <ol class="sense-list">
+                ${byPos.get(pos).map((i, n) => {
+                  const s = senses[i];
+                  return `
+                  <li class="sense-item">
+                    <p class="def"><span class="sense-num">${n+1}.</span> ${escapeHtml(s.definition)}</p>
+                    ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
+                    ${ s.synonyms.length ? `<div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
+                    <div class="sense-save-row">
+                      <button type="button" class="btn-save-sense" data-sense-index="${i}">Save this sense</button>
+                    </div>
+                  </li>`;
+                }).join("")}
+              </ol>
+            </div>`).join("")}
+        `;
       }
 
       const s = senses[0];
-      out.innerHTML = `
-        <article class="card">
-          <div class="headword">${escapeHtml(w.word)}</div>
-          <span class="pos">${escapeHtml(s.pos)}</span>${pronunciation}${
-            w.source === "ai" ? `<span class="ai-badge">AI-generated</span>` : ""
-          }
-          <p class="def">${escapeHtml(s.definition)}</p>
-          ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
-          ${ s.synonyms.length ? `<p class="chips-label">Synonyms</p>
-             <div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
-          ${ s.antonyms.length ? `<p class="chips-label">Antonyms</p>
-             <div class="chips">${s.antonyms.map(x=>chip(x,"ant")).join("")}</div>` : "" }
-          <div class="save-row">
-            ${ AI_ENABLED && w.source !== "ai"
-              ? `<button id="ai-lookup" class="btn-ai" type="button">Get AI definition</button>`
-              : "" }
-            <button id="save" class="btn-save" type="button">Save to list</button>
-          </div>
-        </article>`;
+      return `
+        <span class="pos">${escapeHtml(s.pos)}</span>
+        <p class="def">${escapeHtml(s.definition)}</p>
+        ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
+        ${ s.synonyms.length ? `<p class="chips-label">Synonyms</p>
+           <div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
+        ${ s.antonyms.length ? `<p class="chips-label">Antonyms</p>
+           <div class="chips">${s.antonyms.map(x=>chip(x,"ant")).join("")}</div>` : "" }
+        <div class="save-row">
+          <button id="save" class="btn-save" type="button">Save to list</button>
+        </div>`;
     }
 
-    // Replaces the card with an AI-generated definition for the same word.
-    async function getAIDefinition() {
-      const btn = $("ai-lookup");
-      if (!currentResult || btn.disabled) return;
+    // AI tab body: loading state while the Worker call is in flight, an
+    // error state with a retry, or the AI-generated definition with its own
+    // (separate from the dictionary tab's) save button.
+    function renderAIBody() {
+      const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
+
+      if (aiLoading) return `<p class="status">Asking AI…</p>`;
+      if (aiError) {
+        return `<p class="status error">${escapeHtml(aiError)}</p>
+          <div class="save-row"><button type="button" class="btn-ai" data-tab="ai">Try again</button></div>`;
+      }
+      if (!aiResult) return `<p class="status">Tap AI to generate a definition.</p>`;
+
+      const s = aiResult;
+      return `
+        <span class="pos">${escapeHtml(s.pos)}</span><span class="ai-badge">AI-generated</span>
+        <p class="def">${escapeHtml(s.definition)}</p>
+        ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
+        ${ s.synonyms?.length ? `<p class="chips-label">Synonyms</p>
+           <div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
+        ${ s.antonyms?.length ? `<p class="chips-label">Antonyms</p>
+           <div class="chips">${s.antonyms.map(x=>chip(x,"ant")).join("")}</div>` : "" }
+        <div class="save-row">
+          <button id="save-ai" class="btn-save" type="button">Save to list</button>
+        </div>`;
+    }
+
+    // Switches which tab is showing. Opening the AI tab for the first time
+    // on this word (or retrying after an error) kicks off the fetch —
+    // nothing is requested from the Worker just from drawing the toggle.
+    function switchTab(tab) {
+      activeTab = tab;
+      if (tab === "ai" && !aiResult && !aiLoading) {
+        fetchAI();
+        return;
+      }
+      updateTabBody();
+    }
+
+    async function fetchAI() {
+      aiLoading = true;
+      aiError = null;
+      updateTabBody();
+      try {
+        aiResult = await lookupAI(currentResult.word, $("book").value.trim());
+      } catch (err) {
+        aiError = err.message || "AI lookup failed. Try again.";
+      } finally {
+        aiLoading = false;
+        updateTabBody();
+      }
+    }
+
+    // Saves whatever the AI tab is currently showing — separate from
+    // saveCurrentResult()/saveSense() below, which only ever touch the
+    // dictionary tab's data.
+    async function saveAIResult() {
+      const btn = $("save-ai");
+      if (!aiResult || btn.disabled) return;
 
       btn.disabled = true;
-      btn.textContent = "Asking Claude…";
+      btn.textContent = "Saving…";
       try {
-        const result = await lookupAI(currentResult.word, $("book").value.trim());
-        render(result);
+        await saveEntry({
+          word: currentResult.word,
+          meaning: aiResult.definition,
+          partOfSpeech: aiResult.pos,
+          synonyms: aiResult.synonyms,
+          antonyms: aiResult.antonyms,
+          example: aiResult.example,
+          book: $("book").value.trim(),
+          source: "ai",
+        });
+        btn.textContent = "Saved ✓";
+        btn.classList.add("saved");
+        refreshSavedList();
       } catch (err) {
         btn.disabled = false;
-        btn.textContent = "Get AI definition";
+        btn.textContent = "Couldn't save — try again";
+        setTimeout(() => { btn.textContent = "Save to list"; }, 3000);
       }
     }
 
@@ -1410,11 +1536,13 @@
     });
     out.addEventListener("click", (e) => {
       if (e.target.id === "save") saveCurrentResult();
-      if (e.target.id === "ai-lookup") getAIDefinition();
+      if (e.target.id === "save-ai") saveAIResult();
       const audioBtn = e.target.closest(".btn-audio");
       if (audioBtn) new Audio(audioBtn.dataset.audio).play();
       const saveSenseBtn = e.target.closest(".btn-save-sense");
       if (saveSenseBtn) saveSense(Number(saveSenseBtn.dataset.senseIndex));
+      const tabBtn = e.target.closest("[data-tab]");
+      if (tabBtn) switchTab(tabBtn.dataset.tab);
     });
 
     $("book-filter").addEventListener("change", (e) => {

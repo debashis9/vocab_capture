@@ -13,10 +13,32 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   than queueing/retrying failed lookups — lookups are inherently online-only, so this was
   scoped down from "offline queueing"), an in-app install button (`beforeinstallprompt`),
   and a dark theme via `prefers-color-scheme` that keeps the warm-paper/oxblood identity.
-- M4's LLM proxy (`worker/`) and its frontend button are built and locally tested, but
-  intentionally left off (`AI_ENABLED = false`) — activation is deferred until there's a
-  revenue-backed plan for the ongoing API cost, since it's billed separately from any
-  Claude.ai subscription.
+- **M4 is DONE and live as of 2026-07-24** — backed by Gemma 4 (26B MoE, `gemma-4-26b-a4b-it`)
+  via Google's free-tier Gemini API, not Claude Haiku as originally planned. The Cloudflare
+  Worker (`worker/`) is deployed at `https://margin-llm-proxy.debashis9.workers.dev`, with
+  `GEMINI_API_KEY` stored as a Worker secret (never in this repo) and `ALLOWED_ORIGIN` set to
+  the live GitHub Pages origin. `AI_ENABLED = true`. UI: a Dictionary/AI toggle at the top of
+  the result card — Dictionary shows by default (unchanged, including the multi-sense
+  picker); switching to AI lazily fetches a Gemma-generated, book-context-aware definition
+  the first time it's opened for that word (not on every lookup), then caches it so
+  switching back and forth afterward is instant. Both tabs have their own independent "Save
+  to list" button (`saveEntry`/`saveAIResult`), and the app's own `.card` element is reused
+  across tab switches (not rebuilt) so the CSS entrance animation doesn't retrigger on every
+  click. The originally-planned Claude Haiku path (`/define` on the same Worker) still
+  exists in code but the Anthropic key backing it has zero credits — effectively unused;
+  Gemma won on cost (free vs ~$0.0015/lookup) after a deliberate latency-tuning pass (see
+  below) closed the gap that made it look impractical at first.
+- **Gemma 4 latency was tuned down ~6x before shipping.** An unoptimized request (full
+  prompt, default thinking, non-streaming) took ~19s and burned 770 tokens on internal
+  reasoning versus 78 on the actual answer. Fixed via `generationConfig.thinkingConfig:
+  {thinkingLevel: "minimal"}` (verified live — `thinkingBudget: 0`, which works on other
+  Gemini models, is flatly rejected for Gemma 4), `maxOutputTokens: 300`, a trimmed
+  Gemma-only system prompt (separate from the Claude path's, which doesn't need
+  JSON-formatting instructions since Anthropic's structured outputs feature guarantees the
+  shape), and switching from a blocking `generateContent` call to `streamGenerateContent`
+  so time-to-first-token is observable at all. Result: ~2.8-3.2s total, ~1.2-1.5s to first
+  token. One real bug hit along the way: this API's SSE stream uses `\r\n` line endings, not
+  `\n` — a naive frame parser silently produces no output without that fix.
 - **Multi-sense lookup, done 2026-07-23.** `pickBest()` used to grab only the free
   dictionary's `meanings[0]`/`definitions[0]`, silently dropping every other sense — e.g.
   "incandescent" showed the rare noun sense ("an incandescent lamp or bulb") instead of the
@@ -54,26 +76,31 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   you've already saved no longer merges the book into the existing row (the old IndexedDB
   version did) — it's a plain insert, so the same word saved from two books now makes two
   rows. Revisit if that's missed in practice.
-- Live and installed on Windows and Android; hosted via GitHub Pages. **Not yet pushed:**
-  all of Phase 2 (auth + Supabase storage) is committed locally on `main` but not pushed —
-  the live site still only has M0–M5 + Phase 4. See "Picking up next session" below.
+- Live and installed on Windows and Android; hosted via GitHub Pages, fully up to date with
+  `main` (last pushed 2026-07-23, includes Phase 2, the invite-only trigger, and multi-sense
+  lookup). SMTP: Gmail (debashis9@gmail.com + a Google App Password), not Resend — Resend
+  needs a verified domain to email anyone but the signup address itself, and buying one
+  solely to unblock it wasn't worth it for a personal/family-tester app.
 
 ## Picking up next session
-- **Phase 2 is fully verified end-to-end as of 2026-07-23.** Custom SMTP (Gmail, see below)
-  fixed the rate-limit block; signed in for real via magic link, saved a word, and confirmed
-  the row in the Supabase Table Editor with correct columns. The editor also showed **4 RLS
-  policies** active on `entries`, confirming RLS is actually enforcing (not just present) —
-  this had been the one thing a read-only anon-key probe couldn't distinguish earlier.
-- **SMTP decided: Gmail SMTP**, not Resend. Resend was picked first, then reversed on
-  finding out no domain is owned — Resend's sandbox mode can only email the signup address
-  itself, which doesn't work for family testers signing in with their own emails, and buying
-  a domain solely to unblock Resend wasn't worth it. Wired into Supabase → Authentication →
-  Emails → SMTP Settings using debashis9@gmail.com + a Google App Password. Revisit Resend
-  only if a real custom domain shows up for other reasons.
-- **README.md needs trimming** — flagged as having too much information. Hold off on a
-  rewrite until there's time to review what actually stays; don't do this unsupervised.
-- **Pushed to `origin/main` on 2026-07-23.** Phase 2 (auth + Supabase storage + the
-  invite-only trigger) is now live on GitHub Pages, not just committed locally.
+- **Decided: not swapping the dictionary API source, for now.** Looked at
+  freedictionaryapi.com (same Wiktionary data as today, no key, better-structured response)
+  and Wordnik (genuinely different curated sources — AHD, Century, WordNet — needs a free
+  API key) as alternatives to the current dictionaryapi.dev, prompted by a real quality
+  complaint ("incandescent" showing a nonsensical definition). Root cause turned out to be
+  an app-side bug (grabbing `meanings[0]` regardless of part of speech), not the API itself —
+  fixed by the multi-sense picker above. With that fixed, swapping sources isn't worth the
+  effort right now. Revisit only if sense quality is still a complaint after using
+  multi-sense for a while; Merriam-Webster stays reserved for if/when this goes fully public.
+- **Open bug: magic-link sign-in fails for a second (non-owner) email**, `ERR_CONNECTION_RESET`
+  in the browser right after clicking the link, on the live GitHub Pages site. Ruled out:
+  the Redirect URLs config (has an exact, non-wildcard entry for the live origin) and
+  `allowed_emails` (that email is already on it). Suspect network-layer, not app
+  config — clicking a Supabase magic link hits Supabase's own `/auth/v1/verify` endpoint
+  first, before ever reaching this app, so a reset there could be a firewall/antivirus on the
+  other person's device/network, or their email client's link-scanning proxy, rather than
+  anything wrong with this repo. **Deferred until the other person is around in person to
+  test together** — no fix attempted yet, don't guess further without them present.
 
 ## Architecture (hold to these)
 - **One file:** the whole app lives in `index.html` (HTML + CSS + JS inline), kept readable
@@ -86,7 +113,9 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   cache the Supabase CDN script, and saved words now live entirely in Supabase (no local
   fallback since storage moved off IndexedDB) — opening the app fully offline will fail
   until Phase 2b addresses this. Not fixed yet, flagged for later.
-- **Lookups:** currently the free dictionaryapi.dev API (no key). An LLM upgrade comes later.
+- **Lookups:** the free dictionaryapi.dev API (no key) is still the default/Dictionary tab.
+  The AI tab is Gemma 4 via Google's Gemini API, called through the Cloudflare Worker — see
+  M4 in Current state above.
 
 ## Rules that protect future phases — do not break
 1. **Wrap all persistence in a small storage module** (`saveEntry`, `getEntries`,
@@ -106,12 +135,8 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 - M2: save lookups to IndexedDB via the storage module; a saved list that loads on open,
   filters by book, and supports delete. DONE.
 - M3: voice input (mic button, Web Speech API). DONE.
-- **M4: built but dormant.** A Cloudflare Worker proxy (`worker/`) calls Claude Haiku 4.5
-  for a book-context-aware AI definition, and the frontend has a "Get AI definition"
-  button — but it's feature-flagged off (`AI_ENABLED = false` in `index.html`) because
-  the API key needs its own separate billing (not covered by a Claude.ai subscription).
-  Decision: hold off until scaling to a wider audience with a revenue model in place, then
-  flip the flag and deploy the Worker. See `worker/README.md` for activation steps.
+- **M4: DONE** — live via Gemma 4 (free tier), not Claude Haiku as originally planned. See
+  Current state above for the full picture and `worker/README.md` for the deployed setup.
 - M5: polish (offline-aware error message, install prompt, dark theme). DONE.
 - **Phase 4: flashcards + quiz, scoped to the current book filter. DONE** (see Current state
   above for details). Client-side only — no auth needed, which is why this went ahead of
