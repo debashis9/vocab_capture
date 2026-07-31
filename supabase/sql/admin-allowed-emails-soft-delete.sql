@@ -20,3 +20,31 @@ for update
 to authenticated
 using (auth.uid() = 'YOUR-UID-HERE'::uuid)
 with check (auth.uid() = 'YOUR-UID-HERE'::uuid);
+
+-- 3. Without this, a soft-deleted row would still satisfy the original
+--    "exists" check below and let that email sign in anyway -- the admin
+--    UI's "Delete" would be cosmetic, not a real revocation. This is the
+--    live check_allowed_email() definition (confirmed 2026-07-31) with
+--    exactly one clause added: "and deleted_at is null". Everything else
+--    (SECURITY DEFINER, search_path, the lower() normalization, the
+--    exception message) is unchanged. CREATE OR REPLACE keeps the same
+--    function identity, so the existing "before insert on auth.users"
+--    trigger picks up this new logic immediately -- no need to touch the
+--    trigger itself.
+CREATE OR REPLACE FUNCTION public.check_allowed_email()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  if not exists (
+    select 1 from public.allowed_emails
+    where email = lower(new.email)
+      and deleted_at is null
+  ) then
+    raise exception 'signup rejected: % is not on the invite list', new.email;
+  end if;
+  return new;
+end;
+$function$;
