@@ -97,6 +97,28 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   App Password), not Resend — Resend needs a verified domain to email anyone but the signup
   address itself, and buying one solely to unblock it wasn't worth it for a
   personal/family-tester app.
+- **Custom sign-in email template is DONE, live as of 2026-07-31.** Supabase's default
+  magic-link email (generic, no branding) is replaced by `supabase/email-templates/magic-link.html`
+  — a tracked copy of what's pasted into Supabase → Authentication → Emails → Templates →
+  Magic Link (dashboard is the source of truth; keep both in sync if either changes). Plain
+  table layout with inline styles and web-safe font fallbacks (Georgia/system sans), not
+  Fraunces/Inter, since email clients strip `<style>` blocks and block custom web fonts.
+  Links out to `guide.html` (already public at the GitHub Pages origin) for first-time
+  recipients instead of attaching it — Supabase's template editor has no attachment
+  mechanism at all, even with custom SMTP wired in, since GoTrue renders and sends the email
+  itself. Only the Magic Link template was redone (not "Invite user") since the actual invite
+  flow here is dashboard "Add user" → the person requests their own magic link, never
+  Supabase's separate invite email.
+- **Debugged 2026-07-31: a stale localhost-bound home-screen icon, not a real bug.** A report
+  of "can't sign in from the saved app icon on Android" traced to `index.html`'s
+  `emailRedirectTo: window.location.origin + window.location.pathname` (deliberately dynamic,
+  so local dev and prod both work without hardcoding either) — the icon in question was an
+  old install pointed at `http://localhost:8000` from earlier local testing, so every magic
+  link it generated pointed back at a local dev server that wasn't running, producing a
+  connection error on the phone. Fixed by removing that icon and reinstalling fresh from the
+  real GitHub Pages URL; no code change. `http://localhost:8000` was also removed from
+  Supabase → Authentication → URL Configuration → Redirect URLs afterward so a stray
+  localhost-origin request can't produce a dead-end link like this again.
 
 ## Picking up next session
 - **Decided: not swapping the dictionary API source, for now.** Looked at
@@ -116,11 +138,6 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   suspicion. No code or config change was needed.
 
 ## To-do
-- **Polish the sign-in email template.** New/invited users currently get Supabase's default,
-  generic magic-link email. Worth customizing (Supabase → Authentication → Emails →
-  Templates) to feel less like a raw system email and more in keeping with the app's actual
-  identity — at minimum clearer copy for a first-time recipient who has no context, ideally
-  some visual match to the warm-paper/oxblood look. Not started; no design decided yet.
 - **Phase 2b (offline caching / local-first sync).** Not started. The app currently can't
   open at all without a network connection — no local fallback since storage moved to
   Supabase. The old IndexedDB code (`saveEntryLocal`/`getEntriesLocal`/`deleteEntryLocal`)
