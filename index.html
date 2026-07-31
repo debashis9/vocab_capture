@@ -802,7 +802,8 @@
         );
 
         if (res.status === 404) {
-          out.innerHTML = `<p class="status error">No entry found for “${escapeHtml(word)}”. Check the spelling, or try the base form of the word.</p>`;
+          renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Check the spelling, or try the base form of the word.`
+            + (AI_ENABLED ? " You can also try the AI tab above." : ""));
           return;
         }
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -812,11 +813,21 @@
       } catch (err) {
         const message = navigator.onLine
           ? "Couldn't reach the dictionary. Check your connection and try again."
+            + (AI_ENABLED ? " You can also try the AI tab above." : "")
           : "You're offline — lookups need an internet connection. Try again once you're back online.";
-        out.innerHTML = `<p class="status error">${message}</p>`;
+        renderNotFound(word, message);
       } finally {
         $("go").disabled = false;
       }
+    }
+
+    // Draws the normal card (headword + Dictionary/AI toggle) even though the
+    // free dictionary came up empty, so the AI tab stays one tap away instead
+    // of being a dead end. Doesn't auto-fetch AI itself — that stays opt-in,
+    // same as a successful lookup, so a miss (or a typo) never silently
+    // spends an AI call the user didn't ask for.
+    function renderNotFound(word, message) {
+      render({ word, notFound: true, notFoundMessage: message, source: "typed" });
     }
 
     // Flatten the API's nested response into the fields we care about.
@@ -972,6 +983,11 @@
     // real alternatives) gets a plain "Save to list" button; several senses
     // get the pick-one-to-save list, grouped by part of speech.
     function renderDictionaryBody(w) {
+      // notFoundMessage is already escaped where it's built in lookup() —
+      // not re-escaped here, since it's assembled HTML (the "AI tab" hint),
+      // not raw user input.
+      if (w.notFound) return `<p class="status error">${w.notFoundMessage}</p>`;
+
       const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
       const senses = w.senses || [{ pos: w.pos, definition: w.definition, example: w.example, synonyms: w.synonyms || [], antonyms: w.antonyms || [] }];
 
@@ -1070,7 +1086,9 @@
       try {
         aiResult = await lookupAI(currentResult.word, $("book").value.trim());
       } catch (err) {
-        aiError = err.message || "AI lookup failed. Try again.";
+        aiError = navigator.onLine
+          ? (err.message || "AI lookup failed. Try again.")
+          : "You're offline — the AI tab needs an internet connection. Try again once you're back online.";
       } finally {
         aiLoading = false;
         updateTabBody();
