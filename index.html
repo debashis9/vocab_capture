@@ -459,10 +459,20 @@
     .admin-add-form input:focus { outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent; }
     .admin-email-list { list-style: none; margin: 18px 0 0; padding: 0; }
     .admin-email-row {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      display: flex; align-items: center; gap: 12px;
       padding: 12px 2px; border-bottom: 1px solid var(--line);
     }
     .admin-email-row:last-child { border-bottom: none; }
+    .admin-serial { flex: 0 0 auto; color: var(--ink-soft); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .admin-email-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .admin-email-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .admin-email-meta { color: var(--ink-soft); font-size: 12.5px; }
+    .admin-email-row.deleted { opacity: 0.55; }
+    .admin-email-row.deleted .admin-email-addr { text-decoration: line-through; }
+    .admin-deleted-badge {
+      flex: 0 0 auto; color: var(--ink-soft); font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
     .admin-empty { color: var(--ink-soft); font-size: 14px; padding: 12px 2px 0; }
     .admin-denied { color: var(--oxblood); font-size: 15px; }
   </style>
@@ -1696,9 +1706,21 @@
       renderAdminList();
     }
 
+    function formatDateTime(iso) {
+      return new Date(iso).toLocaleString(undefined, {
+        month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+      });
+    }
+
     async function renderAdminList() {
       $("admin-section").innerHTML = `<p class="status">Loading…</p>`;
-      const { data, error } = await sb.from("allowed_emails").select("email").order("email");
+      // Active rows (deleted_at is null) first, deleted ones after — within
+      // each group, oldest addition first so the serial numbers read as a
+      // stable running log rather than reshuffling on every reload.
+      const { data, error } = await sb.from("allowed_emails")
+        .select("email, added_at, deleted_at")
+        .order("deleted_at", { ascending: true, nullsFirst: true })
+        .order("added_at", { ascending: true });
       if (error) {
         $("admin-section").innerHTML = `<p class="status error">Couldn't load the invite list: ${escapeHtml(error.message)}</p>`;
         return;
@@ -1713,11 +1735,22 @@
           </form>
           <p id="admin-status" class="auth-status error" hidden></p>
           <ul class="admin-email-list">
-            ${data.length ? data.map((row) => `
-              <li class="admin-email-row">
-                <span>${escapeHtml(row.email)}</span>
-                <button type="button" class="saved-delete admin-delete" data-email="${escapeHtml(row.email)}">Delete</button>
-              </li>`).join("") : `<li class="admin-empty">No emails yet.</li>`}
+            ${data.length ? data.map((row, i) => {
+              const isDeleted = !!row.deleted_at;
+              return `
+              <li class="admin-email-row${isDeleted ? " deleted" : ""}">
+                <span class="admin-serial">${i + 1}.</span>
+                <span class="admin-email-info">
+                  <span class="admin-email-addr">${escapeHtml(row.email)}</span>
+                  <span class="admin-email-meta">Added ${formatDateTime(row.added_at)}${
+                    isDeleted ? ` · Deleted ${formatDateTime(row.deleted_at)}` : ""
+                  }</span>
+                </span>
+                ${isDeleted
+                  ? `<span class="admin-deleted-badge">Deleted</span>`
+                  : `<button type="button" class="saved-delete admin-delete" data-email="${escapeHtml(row.email)}">Delete</button>`}
+              </li>`;
+            }).join("") : `<li class="admin-empty">No emails yet.</li>`}
           </ul>
         </div>`;
 
@@ -1726,10 +1759,12 @@
         const input = $("admin-add-email");
         const email = input.value.trim().toLowerCase();
         if (!email) return;
-        // Mirrors "on conflict do nothing" — ignoreDuplicates skips the
-        // insert instead of erroring when the email's already on the list.
+        // Adding an email that's already active is a harmless no-op; adding
+        // one that was previously deleted revives it (clears deleted_at)
+        // while keeping its original added_at, since it's the same upsert
+        // path either way.
         const { error } = await sb.from("allowed_emails")
-          .upsert({ email }, { onConflict: "email", ignoreDuplicates: true });
+          .upsert({ email, deleted_at: null }, { onConflict: "email" });
         if (error) {
           const status = $("admin-status");
           status.textContent = "Couldn't add: " + error.message;
@@ -1741,7 +1776,12 @@
 
       $("admin-section").querySelectorAll(".admin-delete").forEach((btn) => {
         btn.addEventListener("click", async () => {
-          const { error } = await sb.from("allowed_emails").delete().eq("email", btn.dataset.email);
+          // Soft delete: mark it instead of removing the row, so it stays
+          // visible (greyed out, at the bottom) with a record of when it
+          // was removed, instead of silently vanishing.
+          const { error } = await sb.from("allowed_emails")
+            .update({ deleted_at: new Date().toISOString() })
+            .eq("email", btn.dataset.email);
           if (error) {
             const status = $("admin-status");
             status.textContent = "Couldn't delete: " + error.message;
