@@ -167,6 +167,18 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   word you've already saved into the existing row across books the way the old IndexedDB
   version did — same word from two books now makes two rows. Not fixed since it hasn't
   actually been a problem yet.
+- **Consider Sentry (or similar) once the user base grows past a few known testers.**
+  Discussed 2026-07-31: not worth the setup cost yet (an account, a CDN script, a new data
+  flow to disclose in `guide.html`) while every tester who hits a bug can just text
+  debashis9 directly. Becomes worth it once there are users without a direct line, or enough
+  of them that manual bug reports stop being representative. Free "Developer" tier covers
+  5,000 error events/month, 30-day retention, one seat — comfortably enough for this app's
+  scale for a long while. Would help most with: silent unhandled JS exceptions (most
+  existing failure paths already have friendly try/catch messages, but a truly unexpected
+  one just leaves a blank screen today), Worker-side failures from an API response shape
+  changing (already happened twice with Gemma's SSE format and `thinkingBudget`), and
+  one-off device-specific bugs like the stale-service-worker issue that only headless
+  testing missed.
 
 ## Architecture (hold to these)
 - **One file:** the whole app lives in `index.html` (HTML + CSS + JS inline), kept readable
