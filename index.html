@@ -108,6 +108,24 @@
     }
     .btn-install:hover { background: var(--oxblood-soft); }
 
+    /* ---- Update-available banner ---- */
+    .update-banner {
+      position: sticky; top: max(10px, env(safe-area-inset-top)); z-index: 100;
+      display: flex; align-items: center; justify-content: center;
+      gap: 12px; flex-wrap: wrap;
+      background: var(--oxblood); color: var(--on-oxblood);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 13.5px;
+    }
+    .update-banner[hidden] { display: none; }
+    .update-banner button {
+      background: var(--on-oxblood); color: var(--oxblood);
+      padding: 5px 14px; font-size: 12.5px; border-radius: 999px;
+    }
+    .update-banner button:hover { background: var(--paper-2); }
+
     /* ---- Book tag (bookplate) ---- */
     .book-row { display: flex; align-items: center; gap: 10px; margin: 20px 0 14px; }
     .book-row[hidden] { display: none; }
@@ -452,6 +470,10 @@
 
 <body>
   <div class="wrap">
+    <div id="update-banner" class="update-banner" hidden>
+      <span>A new version of Margin is available.</span>
+      <button id="update-refresh" type="button">Refresh</button>
+    </div>
     <header>
       <button id="theme-toggle" type="button" class="btn-theme" aria-label="Theme: System. Tap to change."></button>
       <h1 class="brand">Margin<span class="dot">.</span></h1>
@@ -1738,7 +1760,19 @@
     // ---------- register the service worker (needed for install + offline shell) ----------
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+
+      // New version available: sw.js already calls skipWaiting()+clients.claim()
+      // on every install/activate, so the new worker takes over automatically —
+      // this just surfaces that moment, since the page already running in
+      // memory doesn't hot-swap its own JS on its own. controllerchange only
+      // fires on a real update (never on first-ever install), so this can't
+      // misfire for a brand-new visitor with nothing to refresh yet.
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        $("update-banner").hidden = false;
+      });
     }
+
+    $("update-refresh").addEventListener("click", () => location.reload());
 
     // ---------- install prompt ----------
     // Chrome/Edge fire this instead of showing their own install UI immediately;
