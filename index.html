@@ -420,6 +420,33 @@
       padding: 6px 14px; font-size: 12px;
     }
     .btn-signout:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
+
+    /* ---- Admin: invite list (private, #admin route only) ---- */
+    .admin-section { margin-top: 40px; }
+    .admin-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 26px 24px;
+    }
+    .admin-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 22px; margin: 0 0 18px; }
+    .admin-add-form { display: flex; gap: 10px; }
+    .admin-add-form input {
+      flex: 1; min-width: 0;
+      font: inherit; font-size: 16px;
+      background: var(--paper-2);
+      border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 12px 14px; color: var(--ink);
+    }
+    .admin-add-form input:focus { outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent; }
+    .admin-email-list { list-style: none; margin: 18px 0 0; padding: 0; }
+    .admin-email-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px 2px; border-bottom: 1px solid var(--line);
+    }
+    .admin-email-row:last-child { border-bottom: none; }
+    .admin-empty { color: var(--ink-soft); font-size: 14px; padding: 12px 2px 0; }
+    .admin-denied { color: var(--oxblood); font-size: 15px; }
   </style>
 </head>
 
@@ -508,6 +535,13 @@
         <div id="practice-body"></div>
       </section>
     </div>
+
+    <!-- Private admin route: only reachable via #admin, never linked from the
+         normal UI. The real access control is the allowed_emails RLS
+         policies in Supabase (this admin's auth.uid() hardcoded there,
+         see supabase/sql/admin-allowed-emails-rls.sql) -- this section's own
+         "not authorized" check is just a clean experience, not the boundary. -->
+    <section id="admin-section" class="admin-section" hidden></section>
   </div>
 
   <!-- Supabase JS v2, loaded before our own script so `supabase.createClient` is ready. -->
@@ -1605,6 +1639,101 @@
 
     // Initial load happens from showSignedIn() once we know there's a session —
     // no unconditional call here, since getEntries() refuses to run signed out.
+
+    // ---------- admin: invite list (private, #admin route only) ----------
+    // Not linked from anywhere in the normal UI. The real access control is
+    // the allowed_emails RLS policies in Supabase (this admin's auth.uid()
+    // hardcoded there, see supabase/sql/admin-allowed-emails-rls.sql) — this
+    // client-side check only keeps the experience clean for anyone else who
+    // stumbles onto the hash; it grants nothing by itself, since a
+    // non-admin's Supabase queries below come back empty (or get rejected)
+    // regardless of what this check decides. Deliberately independent of the
+    // auth section above — its own onAuthStateChange subscription and its
+    // own getSession() call, so nothing in the sign-in/sign-out flow changes.
+    const ADMIN_USER_ID = "650351f4-7164-48df-a983-a722faa6521d";
+
+    function checkAdminRoute(session) {
+      const isAdminRoute = location.hash === "#admin";
+      $("admin-section").hidden = !isAdminRoute;
+      if (!isAdminRoute) return;
+
+      if (!session) {
+        // Not signed in yet — let the normal sign-in screen show as usual;
+        // this re-runs once a session exists (see the subscriptions below).
+        $("admin-section").hidden = true;
+        return;
+      }
+
+      $("auth-section").hidden = true;
+      $("app-content").hidden = true;
+
+      if (session.user.id !== ADMIN_USER_ID) {
+        $("admin-section").innerHTML = `<p class="admin-denied">Not authorized.</p>`;
+        return;
+      }
+      renderAdminList();
+    }
+
+    async function renderAdminList() {
+      $("admin-section").innerHTML = `<p class="status">Loading…</p>`;
+      const { data, error } = await sb.from("allowed_emails").select("email").order("email");
+      if (error) {
+        $("admin-section").innerHTML = `<p class="status error">Couldn't load the invite list: ${escapeHtml(error.message)}</p>`;
+        return;
+      }
+
+      $("admin-section").innerHTML = `
+        <div class="admin-card">
+          <h2 class="admin-title">Invite list</h2>
+          <form id="admin-add-form" class="admin-add-form">
+            <input id="admin-add-email" type="email" placeholder="email@example.com" required />
+            <button type="submit">Add</button>
+          </form>
+          <p id="admin-status" class="auth-status error" hidden></p>
+          <ul class="admin-email-list">
+            ${data.length ? data.map((row) => `
+              <li class="admin-email-row">
+                <span>${escapeHtml(row.email)}</span>
+                <button type="button" class="saved-delete admin-delete" data-email="${escapeHtml(row.email)}">Delete</button>
+              </li>`).join("") : `<li class="admin-empty">No emails yet.</li>`}
+          </ul>
+        </div>`;
+
+      $("admin-add-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const input = $("admin-add-email");
+        const email = input.value.trim().toLowerCase();
+        if (!email) return;
+        // Mirrors "on conflict do nothing" — ignoreDuplicates skips the
+        // insert instead of erroring when the email's already on the list.
+        const { error } = await sb.from("allowed_emails")
+          .upsert({ email }, { onConflict: "email", ignoreDuplicates: true });
+        if (error) {
+          const status = $("admin-status");
+          status.textContent = "Couldn't add: " + error.message;
+          status.hidden = false;
+          return;
+        }
+        renderAdminList();
+      });
+
+      $("admin-section").querySelectorAll(".admin-delete").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const { error } = await sb.from("allowed_emails").delete().eq("email", btn.dataset.email);
+          if (error) {
+            const status = $("admin-status");
+            status.textContent = "Couldn't delete: " + error.message;
+            status.hidden = false;
+            return;
+          }
+          renderAdminList();
+        });
+      });
+    }
+
+    window.addEventListener("hashchange", () => checkAdminRoute(currentSession));
+    sb.auth.onAuthStateChange((_event, session) => checkAdminRoute(session));
+    sb.auth.getSession().then(({ data: { session } }) => checkAdminRoute(session));
 
     // ---------- register the service worker (needed for install + offline shell) ----------
     if ("serviceWorker" in navigator) {
