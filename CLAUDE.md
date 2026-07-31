@@ -137,25 +137,36 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   a successful lookup, so a typo doesn't silently spend Gemini quota. Also made the AI tab's
   own error message offline-aware (`fetchAI()`), matching the dictionary tab's existing
   `navigator.onLine` check, for consistency.
-- **Private `#admin` route for the invite allowlist, done 2026-07-31.** Not linked from
-  anywhere in the normal UI. Real access control is three new RLS policies on
-  `allowed_emails` (`supabase/sql/admin-allowed-emails-rls.sql`) that hardcode the admin
-  account's `auth.uid()` for select/insert/delete — the client-side "Not authorized" check in
-  `checkAdminRoute()` is only a clean experience for anyone who stumbles onto the hash, not
-  the actual boundary; a non-admin's Supabase queries come back empty (or get rejected)
-  regardless of what the UI decides. Deliberately independent of the main auth section — its
-  own `onAuthStateChange` subscription and `getSession()` call, so nothing in sign-in/sign-out
-  changed. Add/remove use `.upsert(..., { ignoreDuplicates: true })`, matching "on conflict do
-  nothing" — a duplicate email is silently a no-op, not an error.
-- **Update-available banner, done 2026-07-31.** `sw.js` already calls `skipWaiting()` +
-  `clients.claim()` on every install/activate, so a new version takes over in the background
-  automatically — but a page already open in memory doesn't hot-swap its own JS just because
-  a new worker took control. Listens for `navigator.serviceWorker`'s `controllerchange` event
-  (fires only on a real update, never on first-ever install, so it can't misfire for a
-  brand-new visitor) and shows a small sticky banner with a Refresh button. For ordinary
-  users this is a nice-to-have, not a fix for a real problem — normal update propagation
-  (next app open, no manual steps) already works; this just makes an otherwise-silent moment
-  visible. Confirmed structurally by dispatching a synthetic `controllerchange` event.
+- **Private `#admin` route for the invite allowlist, done and live-verified 2026-07-31.** Not
+  linked from anywhere in the normal UI. Real access control is RLS policies on
+  `allowed_emails` (`supabase/sql/admin-allowed-emails-rls.sql` for select/insert/delete,
+  `admin-allowed-emails-soft-delete.sql` adds update) that hardcode the admin account's
+  `auth.uid()` — the client-side "Not authorized" check in `checkAdminRoute()` is only a clean
+  experience for anyone who stumbles onto the hash, not the actual boundary; a non-admin's
+  Supabase queries come back empty (or get rejected) regardless of what the UI decides.
+  Deliberately independent of the main auth section — its own `onAuthStateChange` subscription
+  and `getSession()` call, so nothing in sign-in/sign-out changed.
+  **Soft-delete, added same day:** "Delete" sets `deleted_at` instead of removing the row —
+  removed emails stay visible, greyed out and struck through, sorted to the bottom, each row
+  showing serial number plus added/deleted timestamps. Re-adding a previously-deleted email
+  revives it (`.upsert(..., { onConflict: "email" })`, clearing `deleted_at` while keeping the
+  original `added_at`). Critically, `check_allowed_email()` (the `before insert on auth.users`
+  trigger) was patched in the same pass to add `and deleted_at is null` to its existence
+  check — without that, a soft-deleted email would still be able to sign in, making "Delete"
+  cosmetic rather than a real revocation. Confirmed live end-to-end by debashis9: soft-delete
+  UI renders correctly against the real table, and both directions of the trigger fix
+  (deleted email blocked, revived email works again) check out.
+- **Update-available banner, done and live-verified 2026-07-31.** `sw.js` already calls
+  `skipWaiting()` + `clients.claim()` on every install/activate, so a new version takes over in
+  the background automatically — but a page already open in memory doesn't hot-swap its own JS
+  just because a new worker took control. Listens for `navigator.serviceWorker`'s
+  `controllerchange` event (fires only on a real update, never on first-ever install, so it
+  can't misfire for a brand-new visitor) and shows a small sticky banner with a Refresh button.
+  For ordinary users this is a nice-to-have, not a fix for a real problem — normal update
+  propagation (next app open, no manual steps) already works; this just makes an otherwise-silent
+  moment visible. Verified structurally (synthetic `controllerchange` event) and then for real —
+  debashis9 saw it fire after a relogin, correctly reporting v20 before the v21 push and again
+  once v21 actually landed.
 
 ## Picking up next session
 - **Decided: not swapping the dictionary API source, for now.** Looked at
