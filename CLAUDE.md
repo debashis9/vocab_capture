@@ -125,6 +125,18 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   to that dead localhost address — a risk for any tester, not just this device. Fixed
   2026-07-31 by setting Site URL to `https://debashis9.github.io/vocab_capture/` to match the
   allow list.
+- **A dictionary miss is no longer a dead end, done 2026-07-31.** Previously, a 404 from
+  dictionaryapi.dev (or any lookup failure) just printed a plain error string — `render()`
+  was never called, so no card and no Dictionary/AI toggle ever appeared, meaning the AI tab
+  was unreachable for exactly the words that needed it most. `lookup()` now calls a new
+  `renderNotFound(word, message)` on any failure, which builds a `{ notFound: true,
+  notFoundMessage }` stub and reuses the normal `render()`/`renderCard()` path — the card and
+  toggle show up as usual, `renderDictionaryBody()` shows the not-found message (no bogus
+  "Save to list" button) instead of a definition, and the AI tab sits one tap away in its
+  normal not-yet-fetched state. AI still isn't auto-fetched on a miss — stays opt-in, same as
+  a successful lookup, so a typo doesn't silently spend Gemini quota. Also made the AI tab's
+  own error message offline-aware (`fetchAI()`), matching the dictionary tab's existing
+  `navigator.onLine` check, for consistency.
 
 ## Picking up next session
 - **Decided: not swapping the dictionary API source, for now.** Looked at
