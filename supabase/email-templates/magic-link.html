@@ -1,0 +1,85 @@
+<!--
+  Supabase "Magic Link" email template for Margin.
+
+  This file is a tracked copy for reference/version control only — the
+  actual live template is whatever's pasted into the Supabase dashboard at
+  Authentication → Emails → Templates → Magic Link. If you edit one, edit
+  the other so they don't drift.
+
+  Supabase variable used: {{ .ConfirmationURL }} (the one-time sign-in link).
+  Subject line to set in the dashboard alongside this body:
+    Your sign-in link for Margin
+
+  Written as email-safe HTML: table layout, inline styles, web-safe font
+  fallbacks (Georgia / system sans) since most email clients strip <style>
+  blocks or block custom web fonts entirely — this deliberately does not
+  try to load Fraunces/Inter the way the app and guide do.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in to Margin</title>
+</head>
+<body style="margin:0; padding:0; background-color:#FBF9F4;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FBF9F4;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px; width:100%;">
+
+          <!-- Brand -->
+          <tr>
+            <td style="padding-bottom:24px;">
+              <span style="font-family:Georgia,'Times New Roman',serif; font-weight:700; font-size:30px; color:#23201B;">
+                Margin<span style="color:#8A3033;">.</span>
+              </span>
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background-color:#FFFFFF; border:1px solid #E3DDD0; border-radius:16px; padding:32px;">
+              <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:16px; line-height:1.6; color:#23201B;">
+                Tap the button below to sign in. It's a one-time link — it works once and
+                expires shortly, so use it soon after opening this email.
+              </p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
+                <tr>
+                  <td style="background-color:#8A3033; border-radius:10px;">
+                    <a href="{{ .ConfirmationURL }}"
+                       style="display:inline-block; padding:14px 28px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:15px; font-weight:700; color:#FBF9F4; text-decoration:none; border-radius:10px;">
+                      Sign in to Margin
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
+                Didn't request this? You can safely ignore this email — no account changes
+                happen unless the link above is opened.
+              </p>
+
+              <p style="margin:0; padding-top:16px; border-top:1px solid #E3DDD0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
+                New here? A quick guide to what Margin is and how to install it:
+                <a href="https://debashis9.github.io/vocab_capture/guide.html" style="color:#8A3033;">
+                  debashis9.github.io/vocab_capture/guide.html
+                </a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 4px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:12.5px; color:#6B6459; text-align:center;">
+              Margin — a personal vocabulary-capture app.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
