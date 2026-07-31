@@ -137,6 +137,25 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   a successful lookup, so a typo doesn't silently spend Gemini quota. Also made the AI tab's
   own error message offline-aware (`fetchAI()`), matching the dictionary tab's existing
   `navigator.onLine` check, for consistency.
+- **Private `#admin` route for the invite allowlist, done 2026-07-31.** Not linked from
+  anywhere in the normal UI. Real access control is three new RLS policies on
+  `allowed_emails` (`supabase/sql/admin-allowed-emails-rls.sql`) that hardcode the admin
+  account's `auth.uid()` for select/insert/delete — the client-side "Not authorized" check in
+  `checkAdminRoute()` is only a clean experience for anyone who stumbles onto the hash, not
+  the actual boundary; a non-admin's Supabase queries come back empty (or get rejected)
+  regardless of what the UI decides. Deliberately independent of the main auth section — its
+  own `onAuthStateChange` subscription and `getSession()` call, so nothing in sign-in/sign-out
+  changed. Add/remove use `.upsert(..., { ignoreDuplicates: true })`, matching "on conflict do
+  nothing" — a duplicate email is silently a no-op, not an error.
+- **Update-available banner, done 2026-07-31.** `sw.js` already calls `skipWaiting()` +
+  `clients.claim()` on every install/activate, so a new version takes over in the background
+  automatically — but a page already open in memory doesn't hot-swap its own JS just because
+  a new worker took control. Listens for `navigator.serviceWorker`'s `controllerchange` event
+  (fires only on a real update, never on first-ever install, so it can't misfire for a
+  brand-new visitor) and shows a small sticky banner with a Refresh button. For ordinary
+  users this is a nice-to-have, not a fix for a real problem — normal update propagation
+  (next app open, no manual steps) already works; this just makes an otherwise-silent moment
+  visible. Confirmed structurally by dispatching a synthetic `controllerchange` event.
 
 ## Picking up next session
 - **Decided: not swapping the dictionary API source, for now.** Looked at
