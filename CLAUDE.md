@@ -116,9 +116,15 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   old install pointed at `http://localhost:8000` from earlier local testing, so every magic
   link it generated pointed back at a local dev server that wasn't running, producing a
   connection error on the phone. Fixed by removing that icon and reinstalling fresh from the
-  real GitHub Pages URL; no code change. `http://localhost:8000` was also removed from
-  Supabase → Authentication → URL Configuration → Redirect URLs afterward so a stray
-  localhost-origin request can't produce a dead-end link like this again.
+  real GitHub Pages URL; no code change. **A second, more consequential leftover was found in
+  the same pass:** Supabase's own Site URL setting (Authentication → URL Configuration) — the
+  fallback used whenever `emailRedirectTo` doesn't exactly match an entry in the Redirect
+  URLs allow list — was still `http://localhost:8080` from local dev. Since the allow list
+  only ever had the one real entry (`https://debashis9.github.io/vocab_capture/`), *any*
+  sign-in whose computed origin+path didn't match it exactly would have silently fallen back
+  to that dead localhost address — a risk for any tester, not just this device. Fixed
+  2026-07-31 by setting Site URL to `https://debashis9.github.io/vocab_capture/` to match the
+  allow list.
 
 ## Picking up next session
 - **Decided: not swapping the dictionary API source, for now.** Looked at
