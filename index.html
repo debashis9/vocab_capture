@@ -361,6 +361,8 @@
       border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
     }
     .saved-entry.mastered { opacity: 0.6; }
+    .pending-badge { color: var(--ink-soft); }
+    .notfound-badge { color: var(--oxblood); border-color: var(--oxblood); }
     .saved-mastered-toggle {
       background: transparent; color: var(--ink-soft); font-weight: 500; font-size: 13px;
       border: none; padding: 6px 10px; border-radius: 8px; flex: 0 0 auto; white-space: nowrap;
@@ -618,7 +620,12 @@
   </div>
 
   <!-- Supabase JS v2, loaded before our own script so `supabase.createClient` is ready. -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Pinned (not the floating @2 tag) so this exact URL string always
+       matches sw.js's SUPABASE_SDK_URL constant -- caches.match() is
+       exact-URL, so if these two ever drifted apart the cached copy would
+       simply never be found and offline load would silently fail. Keep
+       both in sync if this is ever bumped. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0"></script>
   <script>
     // ---------- tiny helpers ----------
     const $ = (id) => document.getElementById(id);
@@ -651,6 +658,13 @@
       // Saved words are per-account now, so (re)load them the moment we know
       // who's signed in — on initial load and again after a fresh sign-in.
       refreshSavedList();
+      // Covers reopening the app already online with leftover queued words
+      // from a previous offline session (the "online" event below only
+      // fires on an actual reconnect transition, not on a normal load).
+      // Not gated on navigator.onLine -- unreliable (see loadSavedEntries),
+      // and processPendingQueue is already safe to call when genuinely
+      // offline (each item just fails its lookup and stays "pending").
+      processPendingQueue();
     }
 
     // Reacts to every future change: magic-link completion, sign-out, token
@@ -810,7 +824,12 @@
       if (book) query = query.eq("book", book);
       const { data, error } = await query;
       if (error) throw error;
-      return (data || []).map(mapRow);
+      const mapped = (data || []).map(mapRow);
+      // Mirror only unfiltered reads -- a filtered (single-book) read would
+      // otherwise wipe out every other book's entries from the local cache
+      // the moment someone has a book filter selected while online.
+      if (!book) saveEntriesMirror(mapped).catch(() => {});
+      return mapped;
     }
 
     async function deleteEntry(id) {
@@ -829,20 +848,29 @@
       if (error) throw error;
     }
 
-    // ---------- storage (IndexedDB) — unused for now ----------
-    // Kept in place, not deleted: Phase 2b will revisit local/offline caching
-    // (e.g. so the app still works with no connection). Nothing currently calls
-    // these — saveEntry/getEntries/deleteEntry above are Supabase-backed instead.
+    // ---------- storage (IndexedDB) — offline mirror + capture queue ----------
+    // Two jobs: a read-only mirror of the last successful Supabase read (so
+    // the saved list and practice still work with no connection), and a
+    // queue of words explicitly saved while offline, looked up and inserted
+    // for real once back online. saveEntry/getEntries/deleteEntry above stay
+    // the source of truth whenever there's a connection.
     const DB_NAME = "margin";
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
     const STORE = "entries";
+    const PENDING_STORE = "pendingQueue";
 
     function openDBLocal() {
       return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = () => {
-          const store = req.result.createObjectStore(STORE, { keyPath: "id" });
-          store.createIndex("book", "book", { unique: false });
+          const db = req.result;
+          if (!db.objectStoreNames.contains(STORE)) {
+            const store = db.createObjectStore(STORE, { keyPath: "id" });
+            store.createIndex("book", "book", { unique: false });
+          }
+          if (!db.objectStoreNames.contains(PENDING_STORE)) {
+            db.createObjectStore(PENDING_STORE, { keyPath: "id" });
+          }
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
@@ -898,11 +926,90 @@
       });
     }
 
+    // Wholesale-replace mirror of the last successful Supabase read. Unlike
+    // saveEntryLocal above, this never merges by word -- it just makes the
+    // local copy exactly match what Supabase returned. saveEntryLocal's
+    // merge-by-word/comma-joined-book behavior was deliberately dropped on
+    // the Supabase side (see the comment near saveEntry), so reusing it here
+    // would resurrect a behavior the app no longer has.
+    async function saveEntriesMirror(entries) {
+      const db = await openDBLocal();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        const store = tx.objectStore(STORE);
+        store.clear();
+        entries.forEach((e) => store.put(e));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
     async function deleteEntryLocal(id) {
       const db = await openDBLocal();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, "readwrite");
         tx.objectStore(STORE).delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    // ---------- offline capture queue ----------
+    // A word explicitly saved while offline. Queued here, then looked up and
+    // inserted for real via saveEntry() once back online (see
+    // processPendingQueue below) -- this is the ONLY place anything gets
+    // queued, called exclusively from saveQueuedCapture()'s explicit Save
+    // tap, never from typing or auto-search.
+    async function queuePendingCapture({ word, book, contextSentence }) {
+      const db = await openDBLocal();
+      const record = {
+        id: crypto.randomUUID(),
+        word,
+        book,
+        contextSentence,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        lastAttemptAt: null,
+        lastError: null,
+      };
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PENDING_STORE, "readwrite");
+        tx.objectStore(PENDING_STORE).put(record);
+        tx.oncomplete = () => resolve(record);
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function getPendingCaptures() {
+      const db = await openDBLocal();
+      return new Promise((resolve, reject) => {
+        const req = db.transaction(PENDING_STORE, "readonly").objectStore(PENDING_STORE).getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function updatePendingCapture(id, patch) {
+      const db = await openDBLocal();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PENDING_STORE, "readwrite");
+        const store = tx.objectStore(PENDING_STORE);
+        const getReq = store.get(id);
+        getReq.onsuccess = () => {
+          if (!getReq.result) { resolve(); return; }
+          store.put({ ...getReq.result, ...patch });
+        };
+        getReq.onerror = () => reject(getReq.error);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function deletePendingCapture(id) {
+      const db = await openDBLocal();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PENDING_STORE, "readwrite");
+        tx.objectStore(PENDING_STORE).delete(id);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
@@ -914,6 +1021,23 @@
     // a slow response for an earlier, unfinished word can't land after and
     // overwrite a faster response for what was typed next.
     let lookupSeq = 0;
+
+    // Hits dictionaryapi.dev and interprets the result, with no UI side
+    // effects -- shared by lookup() below and the offline queue processor,
+    // so a queued word gets looked up exactly the way a normal typed word
+    // would. Returns {found:true, result} on a hit, {found:false} on a
+    // genuine 404 (dictionary reachable, word just isn't in it), or throws
+    // on any other failure (network unreachable, etc).
+    async function fetchDictionaryEntry(word) {
+      const res = await fetch(
+        "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)
+      );
+      if (res.status === 404) return { found: false };
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      return { found: true, result: pickBest(word, data) };
+    }
+
     async function lookup(word) {
       word = word.trim().toLowerCase();
       if (!word) return;
@@ -923,28 +1047,24 @@
       $("go").disabled = true;
 
       try {
-        const res = await fetch(
-          "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)
-        );
+        const outcome = await fetchDictionaryEntry(word);
         if (seq !== lookupSeq) return; // superseded by a newer lookup
 
-        if (res.status === 404) {
+        if (!outcome.found) {
           renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Check the spelling, or try the base form of the word.`
             + (AI_ENABLED ? " You can also try the AI tab above." : ""));
           return;
         }
-        if (!res.ok) throw new Error("HTTP " + res.status);
-
-        const data = await res.json();
-        if (seq !== lookupSeq) return; // superseded by a newer lookup
-        render(pickBest(word, data));
+        render(outcome.result);
       } catch (err) {
         if (seq !== lookupSeq) return; // superseded by a newer lookup
         const message = navigator.onLine
           ? "Couldn't reach the dictionary. Check your connection and try again."
             + (AI_ENABLED ? " You can also try the AI tab above." : "")
           : "You're offline — lookups need an internet connection. Try again once you're back online.";
-        renderNotFound(word, message);
+        // Unlike the confirmed-404 branch above, we genuinely don't know
+        // whether this word exists -- offer to queue it for later instead.
+        renderNotFound(word, message, { queueable: true });
       } finally {
         if (seq === lookupSeq) $("go").disabled = false;
       }
@@ -955,8 +1075,8 @@
     // of being a dead end. Doesn't auto-fetch AI itself — that stays opt-in,
     // same as a successful lookup, so a miss (or a typo) never silently
     // spends an AI call the user didn't ask for.
-    function renderNotFound(word, message) {
-      render({ word, notFound: true, notFoundMessage: message, source: "typed" });
+    function renderNotFound(word, message, { queueable = false } = {}) {
+      render({ word, notFound: true, notFoundMessage: message, queueable, source: "typed" });
     }
 
     // Flatten the API's nested response into the fields we care about.
@@ -1133,7 +1253,8 @@
       // notFoundMessage is already escaped where it's built in lookup() —
       // not re-escaped here, since it's assembled HTML (the "AI tab" hint),
       // not raw user input.
-      if (w.notFound) return `<p class="status error">${w.notFoundMessage}</p>`;
+      if (w.notFound) return `<p class="status error">${w.notFoundMessage}</p>` +
+        (w.queueable ? `<div class="save-row"><button id="save-queue" class="btn-save" type="button">Save for later</button></div>` : "");
 
       const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
       const senses = w.senses || [{ pos: w.pos, definition: w.definition, example: w.example, synonyms: w.synonyms || [], antonyms: w.antonyms || [] }];
@@ -1342,6 +1463,112 @@
       }
     }
 
+    // "Save for later" on a word we couldn't look up because we're offline
+    // (not a confirmed miss). Only queues the capture -- the actual
+    // definition lookup happens once back online, via processPendingQueue.
+    async function saveQueuedCapture() {
+      const btn = $("save-queue");
+      if (!currentResult || !currentResult.notFound || btn.disabled) return;
+
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      try {
+        await queuePendingCapture({
+          word: currentResult.word,
+          book: $("book").value.trim(),
+          contextSentence: $("context-sentence").value.trim(),
+        });
+        btn.textContent = "Saved for later ✓";
+        btn.classList.add("saved");
+        $("context-sentence").value = "";
+        refreshSavedList();
+        setTimeout(resetToIdle, 700);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Couldn't save — try again";
+        setTimeout(() => { btn.textContent = "Save for later"; }, 3000);
+      }
+    }
+
+    // ---------- offline capture queue: processing ----------
+    // Looks up one queued capture and either saves it for real (source:
+    // "queued") or marks it "not-found" -- shared by the automatic
+    // reconnect processor below and the manual Retry button on a
+    // "not-found" row. Throws on a network/other failure (not a confirmed
+    // miss) so callers can decide what that means without double-marking.
+    async function processOneCapture(capture) {
+      const outcome = await fetchDictionaryEntry(capture.word);
+      if (outcome.found) {
+        await saveEntry({
+          word: outcome.result.word,
+          meaning: outcome.result.definition,
+          partOfSpeech: outcome.result.pos,
+          synonyms: outcome.result.synonyms,
+          antonyms: outcome.result.antonyms,
+          example: outcome.result.example,
+          contextSentence: capture.contextSentence,
+          book: capture.book,
+          source: "queued",
+        });
+        await deletePendingCapture(capture.id);
+      } else {
+        await updatePendingCapture(capture.id, {
+          status: "not-found",
+          lastAttemptAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Runs whenever we come back online (see the window "online" listener
+    // and showSignedIn below). Guarded against overlapping runs (the
+    // "online" event can fire more than once) and against running signed
+    // out (nothing to save to).
+    let queueProcessing = false;
+    async function processPendingQueue() {
+      if (queueProcessing || !currentSession) return;
+      queueProcessing = true;
+      try {
+        const captures = await getPendingCaptures();
+        for (const capture of captures) {
+          // "not-found" ones only get reprocessed via an explicit Retry tap,
+          // not automatically on every reconnect.
+          if (capture.status !== "pending") continue;
+          try {
+            await processOneCapture(capture);
+          } catch (err) {
+            // Network/other failure mid-processing -- leave it "pending" and
+            // stop this pass (we're probably not really reachable after
+            // all); the next reconnect will retry it. Never mark this
+            // "not-found" from a failure that isn't a confirmed miss.
+            await updatePendingCapture(capture.id, {
+              lastAttemptAt: new Date().toISOString(),
+              lastError: err.message || String(err),
+            }).catch(() => {});
+            break;
+          }
+        }
+      } finally {
+        queueProcessing = false;
+        refreshSavedList();
+      }
+    }
+
+    // Manual retry for a single "not-found" row -- reuses the exact same
+    // lookup logic as the automatic processor above.
+    async function retryPendingCapture(id) {
+      const capture = (await getPendingCaptures()).find((c) => c.id === id);
+      if (!capture) return;
+      try {
+        await processOneCapture(capture);
+      } catch (err) {
+        await updatePendingCapture(capture.id, {
+          lastAttemptAt: new Date().toISOString(),
+          lastError: err.message || String(err),
+        }).catch(() => {});
+      }
+      refreshSavedList();
+    }
+
     function dedupe(arr){ return [...new Set(arr.filter(Boolean))]; }
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => (
       {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -1349,11 +1576,51 @@
     // ---------- saved list ----------
     let bookFilter = "";
 
+    // Combines a live Supabase read (falling back to the offline mirror only
+    // when there's genuinely no connection -- an online failure still
+    // surfaces as today's error, unchanged) with this device's pending
+    // capture queue, into one list sorted together by time. Pending/
+    // not-found stubs carry no real definition (see pendingState below) --
+    // callers that build flashcards/quiz must filter those out themselves.
+    async function loadSavedEntries(opts) {
+      const book = opts && opts.book;
+      let live;
+      try {
+        live = await getEntries(opts);
+      } catch (err) {
+        // Deliberately not gated on navigator.onLine -- it's notoriously
+        // unreliable (true just means "some network interface exists," not
+        // "the request could actually succeed"). Any failure of the live
+        // read falls back to the local mirror; if that ALSO throws (a
+        // genuinely different problem, not just no connection), it
+        // propagates up as before.
+        live = await getEntriesLocal(opts);
+      }
+      const pending = (await getPendingCaptures())
+        .filter((p) => !book || p.book === book)
+        .map((p) => ({
+          id: p.id,
+          word: p.word,
+          meaning: "",
+          partOfSpeech: "",
+          synonyms: [],
+          antonyms: [],
+          example: "",
+          contextSentence: p.contextSentence || "",
+          book: p.book || "",
+          source: "queued",
+          masteredAt: null,
+          savedAt: p.createdAt,
+          pendingState: p.status, // "pending" | "not-found"
+        }));
+      return [...pending, ...live].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
+    }
+
     // Re-reads everything from storage and redraws the filter dropdown + the list.
     async function refreshSavedList() {
       let entries;
       try {
-        entries = await getEntries();
+        entries = await loadSavedEntries();
       } catch (err) {
         $("saved-list").innerHTML = `<p class="saved-empty error">Couldn't load your saved words. Check your connection and try again.</p>`;
         return;
@@ -1391,6 +1658,8 @@
       list.innerHTML = entries.map(e => {
         const open = expandedIds.has(e.id);
         const isMastered = !!e.masteredAt;
+        const isPending = e.pendingState === "pending";
+        const isNotFound = e.pendingState === "not-found";
         return `
         <div class="saved-entry${isMastered ? " mastered" : ""}">
           <div class="saved-item">
@@ -1399,24 +1668,33 @@
                 <span class="saved-word-row">
                   <span class="saved-word">${escapeHtml(e.word)}</span>
                   ${ isMastered ? `<span class="mastered-badge">Mastered</span>` : "" }
+                  ${ isPending ? `<span class="mastered-badge pending-badge">Pending</span>` : "" }
+                  ${ isNotFound ? `<span class="mastered-badge notfound-badge">Not found</span>` : "" }
                 </span>
                 <span class="saved-meta">${escapeHtml(e.book || "—")} · ${formatDate(e.savedAt)}</span>
               </span>
               <span class="saved-caret">${open ? "▾" : "▸"}</span>
             </button>
-            <button class="saved-mastered-toggle" type="button" data-id="${e.id}" data-mastered="${isMastered}">${isMastered ? "Unmark" : "Master it"}</button>
-            <button class="saved-delete" type="button" data-id="${e.id}">Delete</button>
+            ${ e.pendingState ? "" : `<button class="saved-mastered-toggle" type="button" data-id="${e.id}" data-mastered="${isMastered}">${isMastered ? "Unmark" : "Master it"}</button>` }
+            ${ isNotFound ? `<button class="saved-mastered-toggle saved-retry" type="button" data-id="${e.id}">Retry</button>` : "" }
+            <button class="saved-delete" type="button" data-id="${e.id}"${ e.pendingState ? ` data-pending="true"` : "" }>Delete</button>
           </div>
           ${ open ? `
             <div class="saved-detail">
-              ${ e.partOfSpeech ? `<span class="pos">${escapeHtml(e.partOfSpeech)}</span>` : "" }
-              <p class="def">${escapeHtml(e.meaning)}</p>
-              ${ e.contextSentence ? `<p class="context-sentence">From your book: “${escapeHtml(e.contextSentence)}”</p>` : "" }
-              ${ e.example ? `<p class="example">“${escapeHtml(e.example)}”</p>` : "" }
-              ${ (e.synonyms||[]).length ? `<p class="chips-label">Synonyms</p>
-                 <div class="chips">${e.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
-              ${ (e.antonyms||[]).length ? `<p class="chips-label">Antonyms</p>
-                 <div class="chips">${e.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
+              ${ e.pendingState ? `
+                <p class="def">${isPending
+                  ? "Waiting for a connection to look this up."
+                  : `No match found for “${escapeHtml(e.word)}” — check the spelling, or delete.`}</p>
+              ` : `
+                ${ e.partOfSpeech ? `<span class="pos">${escapeHtml(e.partOfSpeech)}</span>` : "" }
+                <p class="def">${escapeHtml(e.meaning)}</p>
+                ${ e.contextSentence ? `<p class="context-sentence">From your book: “${escapeHtml(e.contextSentence)}”</p>` : "" }
+                ${ e.example ? `<p class="example">“${escapeHtml(e.example)}”</p>` : "" }
+                ${ (e.synonyms||[]).length ? `<p class="chips-label">Synonyms</p>
+                   <div class="chips">${e.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
+                ${ (e.antonyms||[]).length ? `<p class="chips-label">Antonyms</p>
+                   <div class="chips">${e.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
+              `}
             </div>` : "" }
         </div>
       `;
@@ -1478,8 +1756,10 @@
         // Mastered words are excluded from both flashcards and the quiz (and
         // therefore from its distractor pool too, since both draw from
         // practicePool) — the point of practice is words you don't know yet.
-        practicePool = (await getEntries(bookFilter ? { book: bookFilter } : undefined))
-          .filter(e => !e.masteredAt);
+        // Pending/not-found queued captures have no real definition yet, so
+        // they're excluded here too (they still show in the saved list).
+        practicePool = (await loadSavedEntries(bookFilter ? { book: bookFilter } : undefined))
+          .filter(e => !e.masteredAt && !e.pendingState);
       } catch (err) {
         $("practice-body").innerHTML = `
           <div class="practice-head">
@@ -1745,6 +2025,7 @@
     out.addEventListener("click", (e) => {
       if (e.target.id === "save") saveCurrentResult();
       if (e.target.id === "save-ai") saveAIResult();
+      if (e.target.id === "save-queue") saveQueuedCapture();
       const audioBtn = e.target.closest(".btn-audio");
       if (audioBtn) new Audio(audioBtn.dataset.audio).play();
       const saveSenseBtn = e.target.closest(".btn-save-sense");
@@ -1759,6 +2040,16 @@
     });
 
     $("saved-list").addEventListener("click", async (e) => {
+      // Checked before the generic .saved-mastered-toggle branch below,
+      // since the Retry button shares that class for its visual styling.
+      const retryBtn = e.target.closest(".saved-retry");
+      if (retryBtn) {
+        const originalText = retryBtn.textContent;
+        retryBtn.disabled = true;
+        retryBtn.textContent = "Retrying…";
+        await retryPendingCapture(retryBtn.dataset.id);
+        return;
+      }
       const masterToggle = e.target.closest(".saved-mastered-toggle");
       if (masterToggle) {
         const originalText = masterToggle.textContent;
@@ -1767,7 +2058,7 @@
         masterToggle.textContent = "Saving…";
         try {
           await setMastered(masterToggle.dataset.id, nowMastered);
-          renderSavedList(await getEntries(bookFilter ? { book: bookFilter } : undefined));
+          renderSavedList(await loadSavedEntries(bookFilter ? { book: bookFilter } : undefined));
         } catch (err) {
           masterToggle.disabled = false;
           masterToggle.textContent = "Couldn't update — try again";
@@ -1781,7 +2072,11 @@
         del.disabled = true;
         del.textContent = "Deleting…";
         try {
-          await deleteEntry(del.dataset.id);
+          if (del.dataset.pending === "true") {
+            await deletePendingCapture(del.dataset.id);
+          } else {
+            await deleteEntry(del.dataset.id);
+          }
           expandedIds.delete(del.dataset.id);
           refreshSavedList();
         } catch (err) {
@@ -1796,7 +2091,7 @@
         const id = row.dataset.id;
         expandedIds.has(id) ? expandedIds.delete(id) : expandedIds.add(id);
         try {
-          renderSavedList(await getEntries(bookFilter ? { book: bookFilter } : undefined));
+          renderSavedList(await loadSavedEntries(bookFilter ? { book: bookFilter } : undefined));
         } catch (err) {
           $("saved-list").innerHTML = `<p class="saved-empty error">Couldn't load your saved words. Check your connection and try again.</p>`;
         }
@@ -1933,6 +2228,11 @@
     window.addEventListener("hashchange", () => checkAdminRoute(currentSession));
     sb.auth.onAuthStateChange((_event, session) => checkAdminRoute(session));
     sb.auth.getSession().then(({ data: { session } }) => checkAdminRoute(session));
+
+    // Reconnect trigger for the offline capture queue -- the actual
+    // transition from offline to online, as opposed to showSignedIn's check
+    // above which only covers a normal app load that's already online.
+    window.addEventListener("online", () => { if (currentSession) processPendingQueue(); });
 
     // ---------- register the service worker (needed for install + offline shell) ----------
     if ("serviceWorker" in navigator) {
