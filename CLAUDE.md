@@ -160,15 +160,138 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   `skipWaiting()` + `clients.claim()` on every install/activate, so a new version takes over in
   the background automatically — but a page already open in memory doesn't hot-swap its own JS
   just because a new worker took control. Listens for `navigator.serviceWorker`'s
-  `controllerchange` event (fires only on a real update, never on first-ever install, so it
-  can't misfire for a brand-new visitor) and shows a small sticky banner with a Refresh button.
-  For ordinary users this is a nice-to-have, not a fix for a real problem — normal update
-  propagation (next app open, no manual steps) already works; this just makes an otherwise-silent
-  moment visible. Verified structurally (synthetic `controllerchange` event) and then for real —
-  debashis9 saw it fire after a relogin, correctly reporting v20 before the v21 push and again
-  once v21 actually landed.
+  `controllerchange` event and shows a small sticky banner with a Refresh button. For ordinary
+  users this is a nice-to-have, not a fix for a real problem — normal update propagation (next
+  app open, no manual steps) already works; this just makes an otherwise-silent moment visible.
+  Verified structurally (synthetic `controllerchange` event) and then for real — debashis9 saw
+  it fire after a relogin, correctly reporting v20 before the v21 push and again once v21
+  actually landed. **Correction, 2026-08-02: the original claim here that this "fires only on a
+  real update, never on first-ever install" was wrong** — `clients.claim()` fires
+  `controllerchange` the first time a page becomes controlled too, not just on a genuine
+  version change, so the banner was flashing on any fresh install/unregister-and-reload (found
+  via a headless test with zero prior service worker state, where it fired immediately). Fixed
+  by tracking whether the page already had a controller at load time and only surfacing the
+  banner if it did — a page with no controller yet is a first install, not a real update.
+
+- **A batch of smaller fixes and features, all committed to `main` on 2026-08-02, not yet
+  confirmed pushed past the 2026-07-24 deploy noted above** — bump `sw.js` and hard-refresh to
+  see any of these once they do go out:
+  - **Admin panel: the signed-in admin's own row now shows an `(admin)` badge instead of a
+    Delete button**, so the admin invite-list UI can't be used to lock yourself out of your own
+    list. Purely a UI guard — RLS still doesn't stop a raw API call from deleting your own row,
+    same as every other client-side check in this admin route.
+  - **The SW shell-cache staleness bug, found because of the above**: bumping `sw.js`'s `CACHE`
+    string alone doesn't guarantee fresh bytes, since `caches.addAll(SHELL)` fetches normally and
+    can pull a stale HTTP-cached `index.html` into a brand-new, correctly-named bucket. This is
+    why the admin badge didn't show up live under `v22` even though that cache was confirmed
+    active. Fixed by fetching each shell file with `{cache: "reload"}` during install, forcing a
+    real network hit regardless of the browser's own HTTP cache.
+  - **Saved words can be marked "mastered"** (a timestamp, same soft-flag shape as
+    `allowed_emails.deleted_at`) — greyed out with a badge, automatically excluded from
+    flashcards/quiz (practice should only surface words still being learned), not from the
+    saved list itself. Needed `supabase/sql/entries-context-and-mastered.sql` (additive columns,
+    no RLS changes — `entries`'s existing policies already scope everything to `auth.uid()`).
+  - **An optional "Sentence" field** captures the actual line from the book where a word was
+    found (distinct from `example`, the dictionary/AI's own generic sentence) — same migration
+    as above (`context_sentence` column), shown in the saved list and on flashcards, cleared
+    after each save since it's per-word, unlike "Reading."
+  - **Auto-search**: the dictionary tab fires ~500ms after the last keystroke instead of
+    requiring Enter/"Look up" — the closest thing to real-time this is capable of, since
+    dictionaryapi.dev has no prefix/autocomplete endpoint. Added a sequence-number guard in
+    `lookup()` so a slow response for an earlier, still-being-typed word can't land after and
+    overwrite a faster response for what was typed next.
+  - **The result card resets to the idle prompt ~700ms after a successful save** (word field
+    cleared, focus returned) instead of just sitting there — "Reading" is left untouched since
+    it persists across several words from the same book.
+  - **Preconnect hints** for the dictionary API, the AI Worker, and Supabase, so the first
+    request of a session isn't also paying DNS/TLS handshake cost on top of the real round trip.
+
+- **Offline mode is implemented on the `future/ocr-offline-library` branch (committed
+  2026-08-02, not yet merged to `main`).** The saved list and flashcards/quiz now fall back to
+  a local IndexedDB mirror (`saveEntriesMirror`, refreshed on every successful *unfiltered*
+  Supabase read — a filtered, single-book read deliberately does NOT refresh it, or it would
+  wipe out every other book's cached entries the next time someone has a book filter selected)
+  when the live read fails, addressing the "can't open at all without a connection" gap noted
+  under Architecture below. Also adds an offline capture queue: saving a word you can't
+  currently look up (because you're offline, not because it's a confirmed 404) queues it
+  locally via a new "Save for later" button — shown only on the network-failure path in
+  `renderNotFound`, never on a genuine miss. Queued words are looked up and saved for real
+  (`source: "queued"`) automatically once back online (`processPendingQueue`, triggered by a
+  `window` "online" listener and a check in `showSignedIn`); a capture that turns out to be a
+  genuine miss shows a "Not found" badge with Retry/Delete instead of vanishing. The Supabase
+  SDK is now pinned to an exact version (`@2.111.0`, was a floating `@2` tag) and cached by the
+  service worker, so the app shell itself — not just saved data — can load with no network;
+  previously not even an already-signed-in session could initialize offline at all. **Known,
+  accepted limitation:** only rides out a dead zone within a session that started online, since
+  Supabase access tokens need network to refresh once expired (~1hr default) — not fixable in
+  app code. **One real bug found via the user's own live testing** (not caught by automated
+  testing, which uses Playwright's own reliable offline emulation): the local-mirror fallback
+  was gated on `navigator.onLine`, which turned out to report `true` in at least one real
+  browser/OS combination even though the live read had genuinely failed — fixed by falling back
+  on any live-read failure, unconditionally, rather than trusting that flag.
+
+- **OCR camera-capture, on the same branch, in progress as of 2026-08-02 — implemented but not
+  yet fully verified live.** Point a camera at (or upload a photo of) a page; a new Worker
+  endpoint (`/ocr`, same `verifySupabaseAuth`/CORS pattern as `/define-gemma`) sends the image
+  to Gemma 4 26B — the same model as the AI tab (confirmed via a real test call that it
+  genuinely accepts image input, description matched the actual test image) — and asks for a
+  bounding box per distinct word (Gemini's documented normalized `[ymin,xmin,ymax,xmax]`,
+  0-1000 scale). Chosen over a client-side OCR library (e.g. Tesseract.js) specifically to
+  avoid a second CDN dependency beyond the one exception (Supabase JS) the architecture rule
+  below allows, and because multimodal models handle real, messy photos better than Tesseract
+  in practice. The client renders the captured photo with a transparent tappable button over
+  every word, positioned as a percentage of the image (no pixel math needed, the boxes are
+  already normalized); tapping one calls `lookup()` directly rather than waiting for the
+  auto-search debounce, since tapping a specific word is a far more deliberate action than a
+  typing pause — checked directly that the mic button's own flow does NOT actually auto-trigger
+  a lookup this way, so this was a deliberate divergence from that precedent, not a copy of it.
+  Double-tap toggles ~2x zoom (centered on the tap point) since a real page has far more words
+  than comfortably fit as tap targets on a phone screen — deliberately not full continuous
+  pinch-gesture tracking, chosen as the simpler of two real options since there's no existing
+  touch-gesture code in this app to build on. Both a live `getUserMedia` preview and a plain
+  "Choose a photo" file picker are offered, converging into one shared
+  `processCapturedImage()` pipeline.
+  Three real bugs found via live testing with an actual photographed book page (not caught by
+  synthetic test images, which were too short/simple to trigger any of these): (1) the Gemini
+  response's "thinking" part (still present even at `thinkingLevel: "minimal"`) was being read
+  instead of the real answer — `lookupOcr` was missing the same `!part.thought` filter
+  `lookupGemma`'s streaming parser already needed; (2) `maxOutputTokens: 4096` was too tight for
+  a real, dense page (a 147-word test page alone used ~4300 output tokens) — bumped to 12000;
+  (3) a trailing comma on a recognized word (e.g. `"fences,"`) broke the Dictionary tab's
+  exact-match lookup even though the AI tab tolerated it fine — the OCR prompt now asks for
+  punctuation-stripped text, and the Worker strips it defensively too regardless of whether the
+  model complies.
+  **Known, accepted risk, not resolved:** a real full page took ~1.7 minutes end-to-end
+  (confirmed via the Network tab's Timing panel) before succeeding — uncomfortably close to
+  what's likely a Cloudflare request timeout, though the exact ceiling isn't confirmed.
+  Mitigated only by UI guidance (a bolded callout, not a muted hint, urging a paragraph or a few
+  lines instead of a whole page) — deliberately not solved with a real crop-before-send step or
+  automatic tiling; that's a bigger feature addition to consider only if the hint proves
+  insufficient in practice.
+  **Not yet done, picking up from here:** the Worker has NOT been redeployed since the
+  punctuation fix (the one successful deploy/test cycle was for the thought-filter + token-limit
+  fix only) — `npm run deploy` from `worker/` still needed. Tested successfully on desktop
+  Chrome via `localhost:8000` (DevTools, real book photo) but not yet on a real Android phone,
+  which was the planned next step before pausing — see the USB port-forwarding steps discussed
+  live (not written down here) if picking this back up: enable USB debugging, `chrome://inspect`
+  → port forwarding `8000 → localhost:8000`, visit `http://localhost:8000/` on the phone's
+  Chrome so it's treated as a secure context for camera access.
 
 ## Picking up next session
+- **Immediate next steps on `future/ocr-offline-library` (paused here 2026-08-02):**
+  1. `cd worker && npm run deploy` — the punctuation-stripping fix hasn't gone out yet.
+  2. Test OCR on a real Android phone (not just desktop Chrome via `localhost:8000`) — camera
+     permission, live preview, real-world capture quality, and whether double-tap-zoom actually
+     feels usable with real fingers are all still unverified. Needs a secure context, so either
+     the Chrome `chrome://inspect` USB port-forwarding trick (reuses the existing
+     `localhost:8000` Supabase redirect-URL allowlist entry, no new config) or the real deployed
+     GitHub Pages URL.
+  3. Once both offline mode and OCR check out live, decide whether to merge this branch to
+     `main` — nothing here is blocking that except actually finishing the verification above.
+  4. Local dev note: `worker/` and the project root are separate directories with their own
+     unrelated file listings — running `python3 -m http.server` from inside `worker/` by
+     mistake (easy to do right after running deploy commands from there) serves the Worker's
+     source files instead of the app; `cd` back to the repo root first.
 - **Decided: not swapping the dictionary API source, for now.** Looked at
   freedictionaryapi.com (same Wiktionary data as today, no key, better-structured response)
   and Wordnik (genuinely different curated sources — AHD, Century, WordNet — needs a free
@@ -186,10 +309,11 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   suspicion. No code or config change was needed.
 
 ## To-do
-- **Phase 2b (offline caching / local-first sync).** Not started. The app currently can't
-  open at all without a network connection — no local fallback since storage moved to
-  Supabase. The old IndexedDB code (`saveEntryLocal`/`getEntriesLocal`/`deleteEntryLocal`)
-  is kept around unused specifically for this.
+- **Merge `future/ocr-offline-library` to `main`, once verified live.** Phase 2b (offline
+  caching) is implemented on this branch — see Current state above — but not yet merged; OCR
+  camera-capture is on the same branch and further behind on verification (Worker redeploy
+  pending, no real-phone test yet). See "Picking up next session" above for the concrete
+  remaining steps.
 - **Worker rate limiting.** Flagged when the Worker had no auth check at all; matters less
   now that every request needs a real signed-in Supabase session (see M4 above), but still
   not there as defense-in-depth against a compromised or overly-eager signed-in account.
@@ -217,10 +341,12 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   exception is Supabase JS, loaded via `<script src="...cdn.jsdelivr.net...">` — still no
   build step, so it fits the same spirit.
 - **PWA:** `manifest.json` + `sw.js` make it installable. The service worker caches only the
-  app shell, never dictionary/API responses. Known gap, bigger now than before: it doesn't
-  cache the Supabase CDN script, and saved words now live entirely in Supabase (no local
-  fallback since storage moved off IndexedDB) — opening the app fully offline will fail
-  until Phase 2b addresses this. Not fixed yet, flagged for later.
+  app shell, never dictionary/API responses (the OCR Worker call included — deliberately live-
+  network-only, same as the AI tab). This gap — opening the app fully offline used to fail
+  outright, since the Supabase CDN script wasn't cached and saved words lived entirely in
+  Supabase with no local fallback — is addressed on the `future/ocr-offline-library` branch
+  (pinned+cached Supabase SDK, local mirror + capture queue) but not yet merged to `main`; see
+  Current state above.
 - **Bump `sw.js`'s `CACHE` version constant whenever `index.html` (or `manifest.json`/icons)
   changes.** The service worker caches `./index.html` itself as part of the app shell — a
   real browser with an existing registration keeps serving whatever was cached under the old
@@ -261,8 +387,11 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   Phase 2 back when Phase 2 hadn't started.
 - **Phase 2 (cloud sync): DONE** — auth + storage both wired to Supabase (see Current state
   for details).
-- **Phase 2b (not started):** offline caching / local-first sync, using the IndexedDB code
-  that's been kept around unused for exactly this.
+- **Phase 2b: DONE, on `future/ocr-offline-library`, not yet merged to `main`** — offline
+  caching / local-first sync, using the IndexedDB code that had been kept around unused for
+  exactly this (see Current state above for details).
+- **OCR camera-capture: on the same branch, implemented but not yet fully verified live** —
+  see Current state above and "Picking up next session" for exact remaining steps.
 
 ## Working style
 Explain changes in plain terms — I'm learning. Prefer small, reviewable steps over large
