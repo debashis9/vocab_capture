@@ -15,6 +15,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 
+  <!-- Warm up the DNS/TLS handshake for the two lookup backends and Supabase
+       ahead of the first actual request, so the very first search of a
+       session isn't paying that cost on top of the real round trip. -->
+  <link rel="preconnect" href="https://api.dictionaryapi.dev">
+  <link rel="preconnect" href="https://margin-llm-proxy.debashis9.workers.dev">
+  <link rel="preconnect" href="https://tnaifyahobaswxgervcy.supabase.co">
+
   <style>
     :root {
       --paper:   #FBF9F4;  /* warm page */
