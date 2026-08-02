@@ -902,9 +902,15 @@
     }
 
     // ---------- lookup ----------
+    // Bumped on every call and captured as `seq` so that, now lookups can
+    // fire automatically while typing (see the auto-search debounce below),
+    // a slow response for an earlier, unfinished word can't land after and
+    // overwrite a faster response for what was typed next.
+    let lookupSeq = 0;
     async function lookup(word) {
       word = word.trim().toLowerCase();
       if (!word) return;
+      const seq = ++lookupSeq;
 
       out.innerHTML = `<p class="status">Looking up “${escapeHtml(word)}”…</p>`;
       $("go").disabled = true;
@@ -913,6 +919,7 @@
         const res = await fetch(
           "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)
         );
+        if (seq !== lookupSeq) return; // superseded by a newer lookup
 
         if (res.status === 404) {
           renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Check the spelling, or try the base form of the word.`
@@ -922,15 +929,17 @@
         if (!res.ok) throw new Error("HTTP " + res.status);
 
         const data = await res.json();
+        if (seq !== lookupSeq) return; // superseded by a newer lookup
         render(pickBest(word, data));
       } catch (err) {
+        if (seq !== lookupSeq) return; // superseded by a newer lookup
         const message = navigator.onLine
           ? "Couldn't reach the dictionary. Check your connection and try again."
             + (AI_ENABLED ? " You can also try the AI tab above." : "")
           : "You're offline — lookups need an internet connection. Try again once you're back online.";
         renderNotFound(word, message);
       } finally {
-        $("go").disabled = false;
+        if (seq === lookupSeq) $("go").disabled = false;
       }
     }
 
@@ -1680,10 +1689,27 @@
     updateClearButton();
 
     // ---------- events ----------
-    $("go").addEventListener("click", () => lookup($("word").value));
-    $("word").addEventListener("input", updateClearButton);
-    $("word").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup($("word").value); });
+    // Auto-search: fires ~500ms after the last keystroke, so most words get
+    // looked up without ever touching Enter or "Look up". Manual submit
+    // (Enter / the button) cancels any pending timer so it doesn't also fire
+    // a redundant duplicate lookup right after. dictionaryapi.dev has no
+    // prefix/autocomplete endpoint, so this "wait for a pause" approach is
+    // the closest thing to real-time it supports -- it will occasionally
+    // fire on a genuine mid-word pause and briefly show "not found" before
+    // you finish typing, which is the accepted tradeoff.
+    let autoSearchTimer = null;
+    $("go").addEventListener("click", () => { clearTimeout(autoSearchTimer); lookup($("word").value); });
+    $("word").addEventListener("input", () => {
+      updateClearButton();
+      clearTimeout(autoSearchTimer);
+      if (!$("word").value.trim()) return;
+      autoSearchTimer = setTimeout(() => lookup($("word").value), 500);
+    });
+    $("word").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { clearTimeout(autoSearchTimer); lookup($("word").value); }
+    });
     $("clear-word").addEventListener("click", () => {
+      clearTimeout(autoSearchTimer);
       $("word").value = "";
       updateClearButton();
       $("word").focus();
