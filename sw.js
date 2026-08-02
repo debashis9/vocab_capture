@@ -2,7 +2,7 @@
 // Job in Phase 1: make the app installable and let the *shell* open offline.
 // It deliberately does NOT cache dictionary lookups (those need the live network).
 
-const CACHE = "margin-shell-v25";
+const CACHE = "margin-shell-v26";
 
 // Files that make up the app shell.
 const SHELL = [

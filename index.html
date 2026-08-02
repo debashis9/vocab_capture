@@ -1054,6 +1054,24 @@
       renderCard();
     }
 
+    // Called a beat after a successful save so the result card doesn't just
+    // sit there once its job is done — clears the word field, drops the
+    // card back to the idle prompt, and refocuses the input for the next
+    // word. Doesn't touch "Reading", since that stays the same across
+    // several words from the same book.
+    function resetToIdle() {
+      currentResult = null;
+      aiResult = null;
+      aiLoading = false;
+      aiError = null;
+      activeTab = "dictionary";
+      clearTimeout(autoSearchTimer);
+      out.innerHTML = `<p class="status">Type a word above and press Enter.</p>`;
+      $("word").value = "";
+      updateClearButton();
+      $("word").focus();
+    }
+
     // Rebuilds the whole card from current state — currentResult plus
     // whichever of the dictionary/AI tab bodies is active. Called on every
     // state change (tab switch, AI fetch start/finish) instead of render(),
@@ -1242,6 +1260,7 @@
         btn.classList.add("saved");
         $("context-sentence").value = "";
         refreshSavedList();
+        setTimeout(resetToIdle, 700);
       } catch (err) {
         btn.disabled = false;
         btn.textContent = "Couldn't save — try again";
@@ -1272,6 +1291,7 @@
         btn.classList.add("saved");
         $("context-sentence").value = "";
         refreshSavedList();
+        setTimeout(resetToIdle, 700);
       } catch (err) {
         btn.disabled = false;
         btn.textContent = "Couldn't save — try again";
@@ -1307,6 +1327,7 @@
         btn.classList.add("saved");
         $("context-sentence").value = "";
         refreshSavedList();
+        setTimeout(resetToIdle, 700);
       } catch (err) {
         btn.disabled = false;
         btn.textContent = "Couldn't save — try again";
