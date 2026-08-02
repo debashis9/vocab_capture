@@ -473,6 +473,10 @@
       flex: 0 0 auto; color: var(--ink-soft); font-size: 12px; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.05em;
     }
+    .admin-self-badge {
+      color: var(--oxblood); font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
     .admin-empty { color: var(--ink-soft); font-size: 14px; padding: 12px 2px 0; }
     .admin-denied { color: var(--oxblood); font-size: 15px; }
   </style>
@@ -1703,7 +1707,7 @@
         $("admin-section").innerHTML = `<p class="admin-denied">Not authorized.</p>`;
         return;
       }
-      renderAdminList();
+      renderAdminList(session.user.email);
     }
 
     function formatDateTime(iso) {
@@ -1712,7 +1716,7 @@
       });
     }
 
-    async function renderAdminList() {
+    async function renderAdminList(adminEmail) {
       $("admin-section").innerHTML = `<p class="status">Loading…</p>`;
       // Active rows (deleted_at is null) first, deleted ones after — within
       // each group, oldest addition first so the serial numbers read as a
@@ -1737,16 +1741,19 @@
           <ul class="admin-email-list">
             ${data.length ? data.map((row, i) => {
               const isDeleted = !!row.deleted_at;
+              const isSelf = row.email.toLowerCase() === adminEmail.toLowerCase();
               return `
               <li class="admin-email-row${isDeleted ? " deleted" : ""}">
                 <span class="admin-serial">${i + 1}.</span>
                 <span class="admin-email-info">
-                  <span class="admin-email-addr">${escapeHtml(row.email)}</span>
+                  <span class="admin-email-addr">${escapeHtml(row.email)}${isSelf ? ` <span class="admin-self-badge">(admin)</span>` : ""}</span>
                   <span class="admin-email-meta">Added ${formatDateTime(row.added_at)}${
                     isDeleted ? ` · Deleted ${formatDateTime(row.deleted_at)}` : ""
                   }</span>
                 </span>
-                ${isDeleted
+                ${isSelf
+                  ? ""
+                  : isDeleted
                   ? `<span class="admin-deleted-badge">Deleted</span>`
                   : `<button type="button" class="saved-delete admin-delete" data-email="${escapeHtml(row.email)}">Delete</button>`}
               </li>`;
@@ -1771,7 +1778,7 @@
           status.hidden = false;
           return;
         }
-        renderAdminList();
+        renderAdminList(adminEmail);
       });
 
       $("admin-section").querySelectorAll(".admin-delete").forEach((btn) => {
