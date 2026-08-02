@@ -2,7 +2,7 @@
 // Job in Phase 1: make the app installable and let the *shell* open offline.
 // It deliberately does NOT cache dictionary lookups (those need the live network).
 
-const CACHE = "margin-shell-v23";
+const CACHE = "margin-shell-v24";
 
 // Files that make up the app shell.
 const SHELL = [
@@ -13,10 +13,18 @@ const SHELL = [
   "./icons/icon-512.png",
 ];
 
-// On install: pre-cache the shell.
+// On install: pre-cache the shell. Each file is fetched with {cache: "reload"}
+// to bypass the browser's own HTTP cache -- plain caches.addAll(SHELL) fetches
+// normally, so a stale HTTP-cached index.html could get pulled into a brand
+// new CACHE bucket even though the version name itself is fresh. That's what
+// caused the admin-badge fix to not show up under the "v22" cache on 2026-08-02.
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE).then((c) =>
+      Promise.all(SHELL.map((url) =>
+        fetch(url, { cache: "reload" }).then((res) => c.put(url, res))
+      ))
+    ).then(() => self.skipWaiting())
   );
 });
 

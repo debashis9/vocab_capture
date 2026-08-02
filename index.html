@@ -1871,7 +1871,7 @@
             status.hidden = false;
             return;
           }
-          renderAdminList();
+          renderAdminList(adminEmail);
         });
       });
     }
@@ -1882,16 +1882,17 @@
 
     // ---------- register the service worker (needed for install + offline shell) ----------
     if ("serviceWorker" in navigator) {
+      // Whether this page was already controlled by some worker the moment it
+      // loaded. clients.claim() in sw.js makes controllerchange fire even the
+      // very first time a page becomes controlled (a fresh install, or right
+      // after an unregister-and-reload) — not just on a genuine update. Only
+      // a page that was ALREADY controlled and then gets handed to a
+      // DIFFERENT worker represents a real update worth surfacing.
+      const hadControllerAtLoad = !!navigator.serviceWorker.controller;
       window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
 
-      // New version available: sw.js already calls skipWaiting()+clients.claim()
-      // on every install/activate, so the new worker takes over automatically —
-      // this just surfaces that moment, since the page already running in
-      // memory doesn't hot-swap its own JS on its own. controllerchange only
-      // fires on a real update (never on first-ever install), so this can't
-      // misfire for a brand-new visitor with nothing to refresh yet.
       navigator.serviceWorker.addEventListener("controllerchange", () => {
-        $("update-banner").hidden = false;
+        if (hadControllerAtLoad) $("update-banner").hidden = false;
       });
     }
 
