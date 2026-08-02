@@ -433,6 +433,46 @@
     }
     .practice-done .practice-nav { justify-content: center; }
 
+    /* ---- Camera OCR ---- */
+    .camera-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
+    /* A real callout, not a muted afterthought -- a full page can take over
+       a minute to process and risks timing out, so this needs to actually
+       be read before capturing, not skimmed past below the buttons. */
+    .camera-tip {
+      background: var(--oxblood-soft); border-radius: var(--radius);
+      padding: 12px 14px; margin: 4px 0 16px; font-size: 14px; color: var(--ink);
+    }
+    .camera-tip strong { color: var(--oxblood); }
+    .camera-preview {
+      display: block; width: 100%; max-height: 60vh;
+      border-radius: var(--radius); background: #000;
+    }
+    /* overflow:hidden crops the zoomed photo to this box; touch-action:none
+       stops the browser's own native double-tap/pinch handling from
+       fighting the manual double-tap-to-zoom below. */
+    .ocr-viewport {
+      overflow: hidden; text-align: center; touch-action: none;
+      border-radius: var(--radius); background: #000;
+    }
+    /* display:inline-block so this wrapper shrink-wraps to the image's own
+       rendered size -- the word buttons inside are positioned as a percent
+       of *this* box, so they only stay aligned with the photo if the box
+       is exactly the photo's size, no extra padding/margin. */
+    .ocr-zoom-wrapper {
+      position: relative; display: inline-block;
+      transition: transform 0.2s ease;
+    }
+    .ocr-zoom-wrapper img {
+      display: block; max-width: 100%; max-height: 60vh; width: auto; height: auto;
+    }
+    .ocr-word-choice {
+      position: absolute; background: transparent; border: none; padding: 0;
+      border-radius: 3px;
+    }
+    .ocr-word-choice:hover, .ocr-word-choice:focus-visible {
+      background: var(--oxblood-soft); outline: 2px solid var(--oxblood);
+    }
+
     /* ---- Auth (Supabase magic link) ---- */
     .auth-section { margin-top: 40px; }
     .auth-card {
@@ -579,6 +619,15 @@
             <line x1="12" y1="18" x2="12" y2="22"/>
           </svg>
         </button>
+        <button id="scan" type="button" class="btn-mic btn-scan" aria-label="Scan a page" title="Scan a page">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 8V6a2 2 0 0 1 2-2h2"/>
+            <path d="M4 16v2a2 2 0 0 0 2 2h2"/>
+            <path d="M20 8V6a2 2 0 0 0-2-2h-2"/>
+            <path d="M20 16v2a2 2 0 0 1-2 2h-2"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
         <button id="go">Look up</button>
       </div>
 
@@ -608,6 +657,11 @@
       <!-- Flashcards + quiz, scoped to whatever the book filter above is set to. -->
       <section id="practice-section" class="practice-section" hidden>
         <div id="practice-body"></div>
+      </section>
+
+      <!-- Camera OCR: photograph or upload a page, tap a recognized word to look it up. -->
+      <section id="camera-section" class="camera-section" hidden>
+        <div id="camera-body"></div>
       </section>
     </div>
 
@@ -723,6 +777,10 @@
     // CLAUDE.md for why. Deployed Worker, not local dev.
     const AI_ENABLED = true;
     const AI_ENDPOINT = "https://margin-llm-proxy.debashis9.workers.dev/define-gemma";
+    const OCR_ENDPOINT = "https://margin-llm-proxy.debashis9.workers.dev/ocr";
+    // Long edge of the image actually sent for OCR -- legible enough for
+    // real text, small enough to keep the upload/request reasonable.
+    const OCR_MAX_DIMENSION = 1600;
 
     // Remember the current book between sessions (simple key/value, not the word list).
     const BOOK_KEY = "margin.book";
@@ -1948,6 +2006,17 @@
       if (choiceBtn) answerQuiz(Number(choiceBtn.dataset.index));
     });
 
+    $("camera-section").addEventListener("click", (e) => {
+      if (e.target.id === "camera-close") { closeCameraSection(); return; }
+      if (e.target.id === "camera-take-photo") { openCameraLivePreview(); return; }
+      if (e.target.id === "camera-choose-photo") { $("camera-file-input").click(); return; }
+      if (e.target.id === "camera-capture") { captureFromVideo(); return; }
+      if (e.target.id === "camera-cancel") { renderCameraChooser(); return; }
+      const wordBtn = e.target.closest(".ocr-word-choice");
+      if (wordBtn) { selectOcrWord(wordBtn.dataset.word); return; }
+      if (e.target.id === "camera-retry") { renderCameraChooser(); return; }
+    });
+
     // ---------- voice input ----------
     // Fills the word field only — it never triggers the lookup itself. You review
     // (and fix, if it misheard) before pressing Look up or Enter, same as typing.
@@ -1987,6 +2056,255 @@
     } else {
       // Not supported in this browser (e.g. Firefox) — typing still works fine.
       $("mic").remove();
+    }
+
+    // ---------- camera OCR ----------
+    // Same show/hide shape as practiceToggleTargets()/openPractice()/
+    // closePractice() -- kept as its own separate set of functions rather
+    // than sharing code with practice, since the two have nothing else in
+    // common and a shared abstraction isn't earning its keep here.
+    if (navigator.mediaDevices?.getUserMedia) {
+      $("scan").addEventListener("click", openCameraSection);
+    } else {
+      // No camera API in this browser -- typing/voice still work fine.
+      $("scan").remove();
+    }
+
+    let cameraStream = null; // the active getUserMedia stream, if any
+
+    function cameraToggleTargets() {
+      return [
+        document.querySelector(".book-row"),
+        document.querySelector(".lookup"),
+        out,
+        document.querySelector(".foot"),
+        document.querySelector(".saved-section"),
+      ];
+    }
+
+    // getUserMedia hygiene: every exit path (Cancel, a word tapped, an
+    // error, or once a still frame is captured) calls this one function
+    // rather than stopping tracks inline in four separate places.
+    function stopCamera() {
+      cameraStream?.getTracks().forEach((t) => t.stop());
+      cameraStream = null;
+    }
+
+    function openCameraSection() {
+      cameraToggleTargets().forEach((el) => (el.hidden = true));
+      $("camera-section").hidden = false;
+      renderCameraChooser();
+    }
+
+    function closeCameraSection() {
+      stopCamera();
+      $("camera-section").hidden = true;
+      cameraToggleTargets().forEach((el) => (el.hidden = false));
+    }
+
+    // ---- capture chooser: take a photo, or upload one ----
+    function renderCameraChooser() {
+      stopCamera(); // no live stream while this screen shows
+      $("camera-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a page</h2>
+          <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
+        </div>
+        <p class="practice-lede">Point your camera at a page, or upload a photo, then tap the word you don't know.</p>
+        <p class="camera-tip"><strong>Capture a paragraph or a few lines, not a whole page</strong> — a full page can take over a minute to process and gives smaller, harder-to-tap words.</p>
+        <div class="practice-mode-buttons">
+          <button id="camera-take-photo" type="button">Take a photo</button>
+          <button id="camera-choose-photo" type="button">Choose a photo</button>
+        </div>
+        <input id="camera-file-input" type="file" accept="image/*" hidden />
+      `;
+      $("camera-file-input").addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const img = new Image();
+        img.onload = () => { processCapturedImage(img); img.remove(); };
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    // ---- live preview ----
+    async function openCameraLivePreview() {
+      $("camera-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a page</h2>
+          <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
+        </div>
+        <video id="camera-preview" class="camera-preview" autoplay playsinline muted></video>
+        <div class="practice-mode-buttons">
+          <button id="camera-capture" type="button">Capture</button>
+          <button id="camera-cancel" type="button" class="btn-practice-nav">Cancel</button>
+        </div>
+      `;
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        $("camera-preview").srcObject = cameraStream;
+      } catch (err) {
+        renderCameraError(
+          err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
+            ? "Camera access was denied. Check your browser's site settings and try again."
+            : "Couldn't start the camera. Try again, or choose a photo instead."
+        );
+      }
+    }
+
+    function captureFromVideo() {
+      processCapturedImage($("camera-preview"));
+    }
+
+    function renderCameraLoading() {
+      $("camera-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a page</h2>
+          <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
+        </div>
+        <p class="status">Reading the page…</p>
+      `;
+    }
+
+    function renderCameraError(message) {
+      $("camera-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a page</h2>
+          <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
+        </div>
+        <p class="status error">${escapeHtml(message)}</p>
+        <div class="practice-mode-buttons">
+          <button id="camera-retry" type="button">Try again</button>
+        </div>
+      `;
+    }
+
+    // Shared by both capture methods (live video frame or an uploaded
+    // image) -- draws to a downscaled canvas, uploads it for OCR, and
+    // hands the result to the word-overlay view. `source` is anything
+    // drawImage() accepts (a <video> or an <img>/ImageBitmap).
+    async function processCapturedImage(source) {
+      stopCamera(); // safe even if source wasn't the live video -- no-op then
+
+      const naturalWidth = source.videoWidth || source.naturalWidth || source.width;
+      const naturalHeight = source.videoHeight || source.naturalHeight || source.height;
+      const scale = Math.min(1, OCR_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
+      const width = Math.round(naturalWidth * scale);
+      const height = Math.round(naturalHeight * scale);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(source, 0, 0, width, height);
+
+      // The displayed photo and the photo the model actually saw must be
+      // pixel-dimension-identical, or the overlay math misaligns -- so the
+      // same canvas' data URL is what gets shown later, at this same
+      // width/height, not the source's original resolution.
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      const base64 = dataUrl.split(",")[1];
+
+      renderCameraLoading();
+
+      try {
+        const res = await fetch(OCR_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + currentSession.access_token,
+          },
+          body: JSON.stringify({ image: base64 }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Scan failed (HTTP " + res.status + ")");
+        }
+        const data = await res.json();
+        renderCameraWordOverlay(dataUrl, width, height, data.words || []);
+      } catch (err) {
+        const message = navigator.onLine
+          ? "Couldn't read that page. Try again, or make sure the photo is clear and well-lit."
+          : "You're offline — scanning a page needs an internet connection. Try again once you're back online.";
+        renderCameraError(message);
+      }
+    }
+
+    // Renders the captured photo with a tappable button overlaid on every
+    // recognized word, plus double-tap-to-zoom. Percent-based positioning
+    // (rather than fixed pixels computed from baseWidth/baseHeight) so the
+    // overlay stays aligned with the image at whatever size it actually
+    // renders at -- the model's box coordinates are already normalized
+    // 0-1000 relative to the full image, so converting straight to a
+    // percentage of the wrapper needs no pixel math at all. baseWidth/
+    // baseHeight are only used as the <img>'s width/height attributes, to
+    // hint its aspect ratio before it loads (avoids layout shift).
+    function renderCameraWordOverlay(dataUrl, baseWidth, baseHeight, words) {
+      if (words.length === 0) {
+        renderCameraError("No words found. Try again, or make sure the photo is clear and well-lit.");
+        return;
+      }
+
+      const overlays = words.map((w) => {
+        const [ymin, xmin, ymax, xmax] = w.box;
+        const left = (xmin / 1000) * 100;
+        const top = (ymin / 1000) * 100;
+        const width = ((xmax - xmin) / 1000) * 100;
+        const height = ((ymax - ymin) / 1000) * 100;
+        return `<button type="button" class="ocr-word-choice" data-word="${escapeHtml(w.text)}"
+          style="left:${left}%; top:${top}%; width:${width}%; height:${height}%;"
+          aria-label="${escapeHtml(w.text)}"></button>`;
+      }).join("");
+
+      $("camera-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Tap a word to look it up</h2>
+          <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
+        </div>
+        <p class="practice-hint">Double-tap the photo to zoom in for smaller words.</p>
+        <div id="ocr-viewport" class="ocr-viewport">
+          <div id="ocr-zoom-wrapper" class="ocr-zoom-wrapper">
+            <img src="${dataUrl}" width="${baseWidth}" height="${baseHeight}" alt="Captured page" />
+            ${overlays}
+          </div>
+        </div>
+      `;
+      wireOcrZoom();
+    }
+
+    // Double-tap toggles ~2x zoom centered on the tap point. A double-tap
+    // landing on a word button is treated as two ordinary single taps on
+    // that word instead (each already immediately selects it -- see the
+    // click delegation below) rather than also triggering a zoom.
+    function wireOcrZoom() {
+      const viewport = $("ocr-viewport");
+      const wrapper = $("ocr-zoom-wrapper");
+      let zoomed = false;
+
+      viewport.addEventListener("dblclick", (e) => {
+        if (e.target.closest(".ocr-word-choice")) return;
+        zoomed = !zoomed;
+        if (zoomed) {
+          const rect = viewport.getBoundingClientRect();
+          const originX = ((e.clientX - rect.left) / rect.width) * 100;
+          const originY = ((e.clientY - rect.top) / rect.height) * 100;
+          wrapper.style.transformOrigin = `${originX}% ${originY}%`;
+          wrapper.style.transform = "scale(2)";
+        } else {
+          wrapper.style.transform = "scale(1)";
+        }
+      });
+    }
+
+    // Tapping one specific word on a photo you're looking at is a far more
+    // deliberate, unambiguous action than "has typing paused for 500ms" --
+    // so unlike the mic button (which only fills the word field and waits
+    // for Enter/Look up), this triggers the lookup directly, matching how
+    // #go's own click handler already does it.
+    function selectOcrWord(word) {
+      $("word").value = word;
+      closeCameraSection();
+      clearTimeout(autoSearchTimer);
+      lookup(word);
     }
 
     // ---------- clear button ----------
