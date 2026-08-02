@@ -90,13 +90,9 @@ export default {
       return json({ error: "Invalid JSON body" }, 400, corsHeaders);
     }
 
-    const word = (body.word || "").trim();
-    if (!word) {
-      return json({ error: "Missing 'word'" }, 400, corsHeaders);
-    }
-    const book = (body.book || "").trim();
-    const userMessage = book ? `Word: "${word}"\nBook: "${book}"` : `Word: "${word}"`;
-
+    // /define-gemma and /define both need a word (the "Missing 'word'"
+    // check used to run unconditionally before routing, which would have
+    // wrongly rejected /ocr requests -- they send an image, never a word.
     // /define-gemma is the live path (Gemma 4, free tier). /define is the
     // original Claude Haiku path -- kept in code but effectively dormant,
     // since its ANTHROPIC_API_KEY was never set as a secret on the deployed
@@ -107,12 +103,22 @@ export default {
     const url = new URL(request.url);
     let definition;
     try {
-      if (url.pathname === "/define-gemma") {
-        definition = await lookupGemma(word, book, userMessage, env, body.model);
-      } else if (url.pathname === "/define") {
-        definition = await lookupClaude(userMessage, env);
+      if (url.pathname === "/define-gemma" || url.pathname === "/define") {
+        const word = (body.word || "").trim();
+        if (!word) return json({ error: "Missing 'word'" }, 400, corsHeaders);
+        const book = (body.book || "").trim();
+        const userMessage = book ? `Word: "${word}"\nBook: "${book}"` : `Word: "${word}"`;
+
+        if (url.pathname === "/define-gemma") {
+          definition = await lookupGemma(word, book, userMessage, env, body.model);
+        } else {
+          definition = await lookupClaude(userMessage, env);
+        }
+      } else if (url.pathname === "/ocr") {
+        if (!body.image) return json({ error: "Missing 'image'" }, 400, corsHeaders);
+        definition = await lookupOcr(body.image, env);
       } else {
-        return json({ error: "Not found. Use /define-gemma or /define." }, 404, corsHeaders);
+        return json({ error: "Not found. Use /define-gemma, /define, or /ocr." }, 404, corsHeaders);
       }
       return json(definition, 200, corsHeaders);
     } catch (err) {
@@ -248,6 +254,107 @@ async function lookupGemma(word, book, userMessage, env, modelKey) {
 
   const cleaned = fullText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
   return { ...JSON.parse(cleaned), word, _timing: { ttft_ms: ttftMs, total_ms: totalMs } };
+}
+
+// Verified live against this exact key (2026-08-02, via a real
+// generateContent call with an image + the OCR_PROMPT below): gemma-4-26b-a4b-it
+// genuinely accepts image input and returns correctly-boxed, correctly-
+// ordered word JSON -- same model already used for /define-gemma, per the
+// user's request to keep this on the one model rather than adding a second.
+const OCR_MODEL = GEMMA_MODELS["26b"];
+
+// Asks for a word list AND a bounding box per word (Gemini's documented
+// normalized-coordinate convention: [ymin, xmin, ymax, xmax], each an
+// integer 0-1000 relative to the full image) so the client can let someone
+// tap a word directly on their photo instead of scrolling a list of
+// hundreds of words from a full page. Schema is spelled out in the prompt
+// rather than via responseSchema/responseMimeType -- same reasoning as
+// GEMMA_SYSTEM_PROMPT above: structured-output support isn't confirmed for
+// whatever model ends up serving this, so defensive prompt+parse is the
+// safe default regardless.
+const OCR_PROMPT = `Look at this photo of a page or portion of a page from a book. For every \
+distinct word visible, return its text and its bounding box using the standard normalized \
+coordinate convention: each box is [ymin, xmin, ymax, xmax], integers from 0 to 1000, relative to \
+the full image regardless of its actual pixel dimensions. Lowercase each word's text, and strip any \
+leading or trailing punctuation from it (commas, periods, quotes, etc.) so it's a clean dictionary \
+headword -- but keep the box tight around the word exactly as it appears on the page, punctuation \
+included. Skip page numbers and running headers. Output ONLY this JSON, no markdown fences, no \
+other text: {"words": [{"text": string, "box": [number, number, number, number]}]}`;
+
+// Plain (non-streaming) generateContent, unlike lookupGemma's
+// streamGenerateContent -- the client needs the complete word+box list
+// before it can render anything useful, so there's no benefit to the
+// streaming/SSE complexity here, and it sidesteps that function's own
+// \r\n-frame-parsing bug class entirely.
+async function lookupOcr(imageBase64, env) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${OCR_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: OCR_PROMPT },
+            { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+          ],
+        }],
+        // A page's worth of {"text":...,"box":[...]} entries adds up fast --
+        // a real, dense book page (250-300+ words) needs real headroom, not
+        // just the definition path's 300. 4096 turned out too tight in live
+        // testing (truncated mid-thinking, before any real answer) -- bumped
+        // to 12000, well under the model's own 32768 outputTokenLimit.
+        // thinkingLevel: "minimal" is not optional here -- verified live
+        // that this exact call takes 60s+ (times out) without it and ~9s
+        // with it, same tuning lookupGemma already needed for plain text.
+        generationConfig: {
+          maxOutputTokens: 12000,
+          thinkingConfig: { thinkingLevel: "minimal" },
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`Gemini API HTTP ${res.status}: ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  // "thought" parts (the model's internal reasoning) are still present even
+  // at thinkingLevel: "minimal" and typically come before the real answer --
+  // lookupGemma's own streaming parser already has to skip these; this
+  // function was missing that filter entirely, so it was reading the
+  // thinking text (or nothing, if the response got cut off mid-thought)
+  // instead of the actual word list.
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const text = parts.find((p) => !p.thought && p.text)?.text;
+  if (!text) {
+    const finishReason = data.candidates?.[0]?.finishReason;
+    throw new Error(`No answer text in Gemini OCR response (finishReason: ${finishReason})`);
+  }
+
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const parsed = JSON.parse(cleaned);
+
+  // Defensive pass -- the prompt's instructions are a request, not a
+  // guarantee: drop anything without real text or a well-formed 4-number
+  // box, and strip stray leading/trailing punctuation from the text itself
+  // (e.g. a trailing comma breaks an exact-match dictionary lookup even
+  // though the AI tab tolerates it fine) regardless of whether the model
+  // actually followed that part of the prompt.
+  const words = (parsed.words || [])
+    .map((w) => (w && typeof w.text === "string")
+      ? { ...w, text: w.text.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "") }
+      : w)
+    .filter((w) =>
+      w && typeof w.text === "string" && w.text &&
+      Array.isArray(w.box) && w.box.length === 4 && w.box.every((n) => typeof n === "number")
+    );
+
+  return { words };
 }
 
 function json(data, status, headers) {
