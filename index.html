@@ -230,6 +230,14 @@
       border-left: 2px solid var(--oxblood-soft);
       color: var(--ink-soft); font-style: italic; font-size: 15px;
     }
+    /* Distinct from .example (the dictionary/AI's own generic sentence) --
+       this is the reader's own quote from their book, so it gets a plain
+       (non-italic) treatment and the ink border instead of oxblood. */
+    .context-sentence {
+      margin: 14px 0 0; padding-left: 14px;
+      border-left: 2px solid var(--line);
+      color: var(--ink-soft); font-size: 15px;
+    }
 
     .chips-label {
       font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
@@ -336,9 +344,21 @@
     }
     .saved-row:hover { background: var(--paper-2); }
     .saved-word-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .saved-word-row { display: flex; align-items: center; gap: 8px; }
     .saved-word { font-family: "Fraunces", serif; font-weight: 600; font-size: 17px; }
     .saved-meta { color: var(--ink-soft); font-size: 13px; }
     .saved-caret { color: var(--ink-soft); font-size: 12px; }
+    .mastered-badge {
+      flex: 0 0 auto; color: var(--ink-soft); font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+    }
+    .saved-entry.mastered { opacity: 0.6; }
+    .saved-mastered-toggle {
+      background: transparent; color: var(--ink-soft); font-weight: 500; font-size: 13px;
+      border: none; padding: 6px 10px; border-radius: 8px; flex: 0 0 auto; white-space: nowrap;
+    }
+    .saved-mastered-toggle:hover { color: var(--ink); background: var(--paper-2); }
     .saved-delete {
       background: transparent; color: var(--ink-soft); font-weight: 500; font-size: 13px;
       border: none; padding: 6px 10px; border-radius: 8px; flex: 0 0 auto;
@@ -348,6 +368,7 @@
     .saved-detail .pos { font-size: 15px; }
     .saved-detail .def { font-size: 15px; margin-top: 8px; }
     .saved-detail .example { font-size: 14px; }
+    .saved-detail .context-sentence { font-size: 14px; }
     .saved-detail .chips-label { margin: 14px 0 6px; }
 
     /* ---- Practice (flashcards + quiz) ---- */
@@ -519,6 +540,15 @@
       <div class="book-row">
         <label for="book">Reading</label>
         <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+      </div>
+
+      <!-- The sentence from the book itself, as opposed to `example` -- the
+           dictionary/AI's own generic example -- below. Optional, and cleared
+           after each save since it's specific to one word, not remembered
+           between sessions like "Reading" above. -->
+      <div class="book-row">
+        <label for="context-sentence">Sentence</label>
+        <input id="context-sentence" type="text" placeholder="optional — the line where you found it" autocomplete="off" />
       </div>
 
       <!-- The lookup bar -->
@@ -733,13 +763,15 @@
         synonyms: row.synonyms || [],
         antonyms: row.antonyms || [],
         example: row.example,
+        contextSentence: row.context_sentence,
         book: row.book,
         source: row.source,
+        masteredAt: row.mastered_at,
         savedAt: row.created_at,
       };
     }
 
-    // entry: { word, meaning, partOfSpeech, synonyms, antonyms, example, book, source }
+    // entry: { word, meaning, partOfSpeech, synonyms, antonyms, example, contextSentence, book, source }
     // user_id is never set here — the entries table defaults it to auth.uid(), and
     // Row Level Security is what actually restricts each account to its own rows.
     async function saveEntry(entry) {
@@ -753,6 +785,7 @@
           synonyms: entry.synonyms || [],
           antonyms: entry.antonyms || [],
           example: entry.example,
+          context_sentence: entry.contextSentence || null,
           book: entry.book,
           source: entry.source,
         })
@@ -776,6 +809,16 @@
     async function deleteEntry(id) {
       requireSession();
       const { error } = await sb.from("entries").delete().eq("id", id);
+      if (error) throw error;
+    }
+
+    // Toggles the mastered_at timestamp — null means still learning, a
+    // timestamp means mastered. Same soft-flag shape as allowed_emails.deleted_at.
+    async function setMastered(id, mastered) {
+      requireSession();
+      const { error } = await sb.from("entries")
+        .update({ mastered_at: mastered ? new Date().toISOString() : null })
+        .eq("id", id);
       if (error) throw error;
     }
 
@@ -1182,11 +1225,13 @@
           synonyms: aiResult.synonyms,
           antonyms: aiResult.antonyms,
           example: aiResult.example,
+          contextSentence: $("context-sentence").value.trim(),
           book: $("book").value.trim(),
           source: "ai",
         });
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
+        $("context-sentence").value = "";
         refreshSavedList();
       } catch (err) {
         btn.disabled = false;
@@ -1210,11 +1255,13 @@
           synonyms: currentResult.synonyms,
           antonyms: currentResult.antonyms,
           example: currentResult.example,
+          contextSentence: $("context-sentence").value.trim(),
           book: $("book").value.trim(),
           source: currentResult.source || "typed",
         });
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
+        $("context-sentence").value = "";
         refreshSavedList();
       } catch (err) {
         btn.disabled = false;
@@ -1243,11 +1290,13 @@
           synonyms: sense.synonyms,
           antonyms: sense.antonyms,
           example: sense.example,
+          contextSentence: $("context-sentence").value.trim(),
           book: $("book").value.trim(),
           source: currentResult.source || "typed",
         });
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
+        $("context-sentence").value = "";
         refreshSavedList();
       } catch (err) {
         btn.disabled = false;
@@ -1304,22 +1353,28 @@
       const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
       list.innerHTML = entries.map(e => {
         const open = expandedIds.has(e.id);
+        const isMastered = !!e.masteredAt;
         return `
-        <div class="saved-entry">
+        <div class="saved-entry${isMastered ? " mastered" : ""}">
           <div class="saved-item">
             <button type="button" class="saved-row" data-id="${e.id}" aria-expanded="${open}">
               <span class="saved-word-line">
-                <span class="saved-word">${escapeHtml(e.word)}</span>
+                <span class="saved-word-row">
+                  <span class="saved-word">${escapeHtml(e.word)}</span>
+                  ${ isMastered ? `<span class="mastered-badge">Mastered</span>` : "" }
+                </span>
                 <span class="saved-meta">${escapeHtml(e.book || "—")} · ${formatDate(e.savedAt)}</span>
               </span>
               <span class="saved-caret">${open ? "▾" : "▸"}</span>
             </button>
+            <button class="saved-mastered-toggle" type="button" data-id="${e.id}" data-mastered="${isMastered}">${isMastered ? "Unmark" : "Master it"}</button>
             <button class="saved-delete" type="button" data-id="${e.id}">Delete</button>
           </div>
           ${ open ? `
             <div class="saved-detail">
               ${ e.partOfSpeech ? `<span class="pos">${escapeHtml(e.partOfSpeech)}</span>` : "" }
               <p class="def">${escapeHtml(e.meaning)}</p>
+              ${ e.contextSentence ? `<p class="context-sentence">From your book: “${escapeHtml(e.contextSentence)}”</p>` : "" }
               ${ e.example ? `<p class="example">“${escapeHtml(e.example)}”</p>` : "" }
               ${ (e.synonyms||[]).length ? `<p class="chips-label">Synonyms</p>
                  <div class="chips">${e.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
@@ -1383,7 +1438,11 @@
 
     async function renderPracticeSetup() {
       try {
-        practicePool = await getEntries(bookFilter ? { book: bookFilter } : undefined);
+        // Mastered words are excluded from both flashcards and the quiz (and
+        // therefore from its distractor pool too, since both draw from
+        // practicePool) — the point of practice is words you don't know yet.
+        practicePool = (await getEntries(bookFilter ? { book: bookFilter } : undefined))
+          .filter(e => !e.masteredAt);
       } catch (err) {
         $("practice-body").innerHTML = `
           <div class="practice-head">
@@ -1432,6 +1491,7 @@
           ${ e.partOfSpeech ? `<span class="pos">${escapeHtml(e.partOfSpeech)}</span>` : "" }
           ${ practiceRevealed ? `
             <p class="def">${escapeHtml(e.meaning)}</p>
+            ${ e.contextSentence ? `<p class="context-sentence">From your book: “${escapeHtml(e.contextSentence)}”</p>` : "" }
             ${ e.example ? `<p class="example">“${escapeHtml(e.example)}”</p>` : "" }
             ${ (e.synonyms||[]).length ? `<p class="chips-label">Synonyms</p>
                <div class="chips">${e.synonyms.map(s=>chip(s)).join("")}</div>` : "" }
@@ -1645,6 +1705,22 @@
     });
 
     $("saved-list").addEventListener("click", async (e) => {
+      const masterToggle = e.target.closest(".saved-mastered-toggle");
+      if (masterToggle) {
+        const originalText = masterToggle.textContent;
+        const nowMastered = masterToggle.dataset.mastered !== "true";
+        masterToggle.disabled = true;
+        masterToggle.textContent = "Saving…";
+        try {
+          await setMastered(masterToggle.dataset.id, nowMastered);
+          renderSavedList(await getEntries(bookFilter ? { book: bookFilter } : undefined));
+        } catch (err) {
+          masterToggle.disabled = false;
+          masterToggle.textContent = "Couldn't update — try again";
+          setTimeout(() => { masterToggle.textContent = originalText; }, 3000);
+        }
+        return;
+      }
       const del = e.target.closest(".saved-delete");
       if (del) {
         const originalText = del.textContent;
