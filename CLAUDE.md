@@ -398,10 +398,10 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   Supabase REST calls (empty state, scan through to confirm, appears with cover, tap-to-select
   fills "Reading", delete, manual-entry fallback, and the cover-image-404 placeholder fallback)
   — zero console errors, and a full regression pass confirmed the existing
-  saved-list/book-filter/lookup flow is untouched. **Confirmed live 2026-08-04:** the migration
-  has been run and debashis9 sees the Library screen listing books correctly against the real
-  table. **Still not confirmed: scanning an actual physical book's cover** — the one step that
-  needs a real photo, same as OCR's own path to verification.
+  saved-list/book-filter/lookup flow is untouched. **Fully verified live 2026-08-04 by
+  debashis9:** the migration is run, scanning a real physical book's cover added it correctly,
+  and the Library screen lists books properly against the real table. Nothing about this feature
+  is outstanding.
 
 - **A mobile-usability round, 2026-08-04, from debashis9's first real phone test of the merged
   app** (everything above is now on `main` and pushed — the `future/ocr-offline-library` branch
@@ -462,21 +462,17 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   the Reading row's wrapped layout with the library dropdown, and whether the new underline/
   translucent-wash word marking is actually readable on a real photographed page — the marker
   colours were picked against synthetic test images, so real paper is the honest test.
-  1. **Done 2026-08-04:** `supabase/sql/books-table.sql` has been run, and the Library screen
-     is confirmed rendering correctly against the real table.
-  2. **Still open: a real hands-on test with an actual book**: open the app, tap Library → Add a
-     book, take a real photo of a book's back cover or barcode, and confirm the ISBN/title/author
-     come back right and the cover art loads. This is the one piece only debashis9 can do —
-     everything checkable without a real photo/real database has already been checked (see the
-     verification paragraph above).
-  3. `sw.js` is at `v38`. The Worker (`worker/src/index.js`) is deployed live and matches what's
+  1. **Done 2026-08-04:** `supabase/sql/books-table.sql` is run, a real book was scanned in
+     successfully, and the Library screen renders correctly against the real table — book
+     scanning/library is fully verified, nothing left to check there.
+  2. `sw.js` is at `v38`. The Worker (`worker/src/index.js`) is deployed live and matches what's
      committed — no pending redeploy.
-  4. Decide whether to test OCR on a real Android phone (optional — "Choose a photo" with a
+  3. Decide whether to test OCR on a real Android phone (optional — "Choose a photo" with a
      phone-taken picture has already fully exercised OCR recognition/crop/streaming; only the
      live-camera-specific UX, getUserMedia permission prompt and viewfinder, remains untested,
      and debashis9 has been hesitant about granting camera permissions on mobile). If skipped,
      that's a deliberate choice, not a gap to chase.
-  5. Local dev note: `worker/` and the project root are separate directories with their own
+  4. Local dev note: `worker/` and the project root are separate directories with their own
      unrelated file listings — running `python3 -m http.server` from inside `worker/` by
      mistake (easy to do right after running deploy commands from there) serves the Worker's
      source files instead of the app; `cd` back to the repo root first.
@@ -497,9 +493,6 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   suspicion. No code or config change was needed.
 
 ## To-do
-- **Book scanning: one real-photo test left.** The `books-table.sql` migration is run and the
-  Library screen is confirmed working live (2026-08-04); what's untested is photographing an
-  actual book cover/barcode and checking the ISBN/title/author/cover art come back right.
 - **Worker rate limiting.** Flagged when the Worker had no auth check at all; matters less
   now that every request needs a real signed-in Supabase session (see M4 above), but still
   not there as defense-in-depth against a compromised or overly-eager signed-in account.
