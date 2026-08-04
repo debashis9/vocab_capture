@@ -86,22 +86,31 @@
     .wrap { max-width: 620px; margin: 0 auto; }
 
     /* ---- Masthead ---- */
-    header { position: relative; padding: 8px 0 22px; border-bottom: 1px solid var(--line); }
+    header { position: relative; padding: 8px 0 20px; border-bottom: 1px solid var(--line); }
     .brand {
       font-family: "Fraunces", serif;
       font-weight: 600;
       font-size: 30px;
       letter-spacing: -0.01em;
       margin: 0;
-      padding-right: 44px; /* keep the title clear of the theme toggle */
+      padding-right: 130px; /* keep the title clear of Sign out + the theme toggle */
     }
     .brand .dot { color: var(--oxblood); }
+    /* The one mark: a dog-eared page corner, the reader's own way of saying
+       "come back to this" — which is the whole app in one gesture. Kept at
+       text size beside the wordmark rather than blown up as a logo. */
+    .dogear { display: inline-flex; vertical-align: -2px; margin-left: 8px; color: var(--ink-soft); }
     .tagline { margin: 4px 0 0; color: var(--ink-soft); font-size: 14px; }
 
+    /* Account + theme chrome, out of the way in the masthead corner. */
+    .header-actions {
+      position: absolute; top: 2px; right: 0;
+      display: flex; align-items: center; gap: 8px;
+    }
+
     .btn-theme {
-      position: absolute; top: 4px; right: 0;
       display: flex; align-items: center; justify-content: center;
-      width: 34px; height: 34px; padding: 0;
+      width: 34px; height: 34px; padding: 0; flex: 0 0 auto;
       background: transparent; color: var(--ink-soft);
       border: 1.5px solid var(--line); border-radius: 999px;
     }
@@ -134,7 +143,7 @@
     .update-banner button:hover { background: var(--paper-2); }
 
     /* ---- Book tag (bookplate) ---- */
-    .book-row { display: flex; align-items: center; gap: 10px; margin: 20px 0 14px; }
+    .book-row { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; }
     .book-row[hidden] { display: none; }
     .book-row label {
       font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
@@ -155,7 +164,7 @@
     .book-row .book-filter { flex: 0 0 auto; width: 104px; }
 
     /* ---- Lookup bar ---- */
-    .lookup { display: flex; gap: 10px; }
+    .lookup { display: flex; gap: 10px; margin-top: 24px; }
     .lookup[hidden] { display: none; }
     .word-field { position: relative; flex: 1; min-width: 0; }
     .word-field input {
@@ -295,11 +304,15 @@
     .sense-item .example { font-size: 14px; }
     .sense-item .chips { margin-top: 10px; }
     .sense-save-row { margin-top: 12px; display: flex; justify-content: flex-end; }
+    /* Neutral until you reach for it: on a word with several senses these
+       repeat down the whole card, and three outlined-oxblood pills in a
+       column read as three alarms rather than one choice. */
     .btn-save-sense {
-      background: transparent; color: var(--oxblood);
-      border: 1.5px solid var(--oxblood); border-radius: 999px;
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line); border-radius: 999px;
       padding: 6px 14px; font-size: 13.5px;
     }
+    .btn-save-sense:hover, .btn-save-sense:focus-visible { color: var(--oxblood); border-color: var(--oxblood); }
     .btn-save-sense:hover { background: var(--oxblood-soft); }
     .btn-save-sense.saved { border-color: var(--line); color: var(--ink-soft); }
 
@@ -334,14 +347,49 @@
     .source-toggle button.active:hover { background: var(--oxblood-hover); color: var(--on-oxblood); }
     #tab-body { margin-top: 4px; }
 
-    .foot { margin-top: 30px; color: var(--ink-soft); font-size: 13px; text-align: center; }
-    .foot code { background: var(--paper-2); padding: 1px 6px; border-radius: 5px; }
+    /* ---- The line from your book (in-card, per word) ---- */
+    /* Lives in the result card rather than above the lookup bar: you only
+       have a line to quote once you have a word, and it's cleared after
+       every save, unlike "Reading". Collapsed to a single quiet link until
+       there's actually something to type. */
+    /* Sits between the source toggle and the definitions: you write down the
+       line while the book is still open in front of you, then pick the
+       meaning that fits it. */
+    .sentence-field { margin-top: 12px; }
+    .btn-sentence {
+      background: transparent; color: var(--ink-soft); font-weight: 500;
+      border: none; padding: 0; font-size: 13.5px;
+    }
+    .btn-sentence:hover { background: transparent; color: var(--oxblood); }
+    .sentence-field input {
+      width: 100%; font: inherit; font-size: 15px;
+      background: transparent; color: var(--ink);
+      border: none; border-bottom: 1.5px dashed var(--line);
+      padding: 6px 2px;
+    }
+    .sentence-field input:focus { outline: none; border-bottom-color: var(--oxblood); }
+    .sentence-label {
+      display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--ink-soft); margin-bottom: 4px;
+    }
 
     /* ---- Saved list ---- */
-    .saved-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
-    .saved-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    /* A real gap here, not just a rule: the capture tool above and the
+       archive below are two different jobs. */
+    .saved-section { margin-top: 64px; padding-top: 26px; border-top: 1px solid var(--line); }
+    .saved-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     .saved-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 20px; margin: 0; }
-    .saved-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+    /* The whole list is folded away behind this until asked for -- a page of
+       saved words is reference material, not something to walk past every
+       time you want to look one up. */
+    .saved-toggle {
+      display: flex; align-items: baseline; gap: 8px;
+      background: transparent; color: inherit; font: inherit;
+      border: none; padding: 4px 6px 4px 2px; margin-left: -2px; border-radius: 8px;
+    }
+    .saved-toggle:hover { background: var(--paper-2); }
+    .saved-count { font-family: "Inter", sans-serif; font-weight: 500; font-size: 13px; color: var(--ink-soft); }
+    .saved-filter-row { display: flex; margin: 14px 0 4px; }
     .book-filter {
       font: inherit; font-size: 13px; color: var(--ink-soft);
       background: var(--paper-2); border: 1px solid var(--line);
@@ -353,26 +401,31 @@
          full when it's open. */
       flex: 0 1 auto; min-width: 0; max-width: 150px; text-overflow: ellipsis;
     }
+    /* Quiet by default -- "Look up" is the one filled accent on this screen,
+       and a second outlined-oxblood button beside it just competes. */
     .btn-practice {
       font-size: 13px;
-      background: transparent; color: var(--oxblood);
-      border: 1.5px solid var(--oxblood);
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line);
       padding: 7px 14px;
     }
-    .btn-practice:hover { background: var(--oxblood-soft); }
+    .btn-practice:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
     .btn-practice[hidden] { display: none; } /* no saved words at all yet */
     .saved-empty { color: var(--ink-soft); font-size: 14px; }
     .saved-empty.error { color: var(--oxblood); }
     .saved-entry { border-bottom: 1px solid var(--line); }
     .saved-entry:last-child { border-bottom: none; }
     .saved-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    /* The row is now the whole width and its only content is the word --
+       "Learned it" and "Delete" moved into the opened detail below, where
+       they belong to one word instead of repeating down the whole page. */
     .saved-row {
-      flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+      flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
       background: none; border: none; text-align: left; font: inherit; color: inherit;
       padding: 14px 2px; border-radius: 8px;
     }
     .saved-row:hover { background: var(--paper-2); }
-    .saved-word-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .saved-word-line { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .saved-word-row { display: flex; align-items: center; gap: 8px; }
     .saved-word { font-family: "Fraunces", serif; font-weight: 600; font-size: 17px; }
     .saved-meta { color: var(--ink-soft); font-size: 13px; }
@@ -395,6 +448,10 @@
       border: none; padding: 6px 10px; border-radius: 8px; flex: 0 0 auto;
     }
     .saved-delete:hover { color: var(--oxblood); background: var(--oxblood-soft); }
+    .saved-detail-actions {
+      display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+      margin-top: 16px;
+    }
     .saved-detail { padding: 0 2px 18px; }
     .saved-detail .pos { font-size: 15px; }
     .saved-detail .def { font-size: 15px; margin-top: 8px; }
@@ -454,6 +511,16 @@
       margin: 0 0 20px;
     }
     .practice-done .practice-nav { justify-content: center; }
+
+    /* Practice, Scan and Library take over the page -- everything above them
+       is hidden while they're open, so their own divider and top margin were
+       framing an empty band under the masthead. When .lookup is hidden, the
+       open section is effectively the top of the page. */
+    .lookup[hidden] ~ .practice-section,
+    .lookup[hidden] ~ .camera-section,
+    .lookup[hidden] ~ .library-section {
+      margin-top: 24px; padding-top: 0; border-top: none;
+    }
 
     /* ---- Camera OCR ---- */
     .camera-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
@@ -596,7 +663,16 @@
        onerror just toggles visibility between the two instead. */
     .book-cover.cover-failed { display: none; }
     .book-cover-placeholder.cover-ok { display: none; }
-    .book-select { flex: 1; min-width: 0; text-align: left; background: transparent; border: none; padding: 0; }
+    /* display:flex puts the cover beside the title (it used to break onto its
+       own line, since .saved-word-line is itself a block-level flex box), and
+       the explicit colour undoes the global `button { color: var(--on-oxblood) }`
+       -- which this button inherited, painting the title near-white on the
+       near-white page, i.e. invisible in light mode. */
+    .book-select {
+      flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px;
+      text-align: left; background: transparent; color: var(--ink);
+      border: none; padding: 0;
+    }
     .book-select:hover .book-title { color: var(--oxblood); }
     .book-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 16px; }
     .book-meta { color: var(--ink-soft); font-size: 13px; margin-top: 2px; }
@@ -626,20 +702,20 @@
       padding: 12px 14px; color: var(--ink);
     }
     .auth-form input:focus { outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent; }
+    .auth-note { margin: 20px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
     .auth-status { margin: 16px 0 0; color: var(--ink-soft); font-size: 14px; }
     .auth-status.error { color: var(--oxblood); }
 
-    .account-bar {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      margin: 4px 0 18px;
-    }
-    .account-email { color: var(--ink-soft); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* In the masthead corner beside the theme toggle. The signed-in email
+       used to sit next to it, but it only ever restated something you
+       already know -- you can't be looking at this screen signed out. */
     .btn-signout {
       flex: 0 0 auto;
       background: transparent; color: var(--ink-soft);
       border: 1.5px solid var(--line);
       padding: 6px 14px; font-size: 12px;
     }
+    .btn-signout[hidden] { display: none; }
     .btn-signout:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
 
     /* ---- Admin: invite list (private, #admin route only) ---- */
@@ -718,9 +794,19 @@
       <button id="update-refresh" type="button">Refresh</button>
     </div>
     <header>
-      <button id="theme-toggle" type="button" class="btn-theme" aria-label="Theme: System. Tap to change."></button>
-      <h1 class="brand">Margin<span class="dot">.</span></h1>
-      <p class="tagline">Catch a word from whatever you're reading.</p>
+      <!-- Sign out sits up here with the theme toggle rather than in its own
+           strip below: it's account chrome, not part of capturing a word. -->
+      <div class="header-actions">
+        <button id="sign-out" type="button" class="btn-signout" hidden>Sign out</button>
+        <button id="theme-toggle" type="button" class="btn-theme" aria-label="Theme: System. Tap to change."></button>
+      </div>
+      <h1 class="brand">Margin<span class="dot">.</span><span class="dogear" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <path d="M3.5 3.5h11.5L20.5 9v11.5h-17z" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M15 3.5V9h5.5z" fill="var(--oxblood)"/>
+        </svg>
+      </span></h1>
+      <p class="tagline">Catch a word mid-page.</p>
       <button id="install" type="button" class="btn-install" hidden>Install Margin</button>
     </header>
 
@@ -734,38 +820,16 @@
           <button type="submit">Send me a link</button>
         </form>
         <p id="auth-status" class="auth-status" hidden></p>
+        <!-- What used to be a permanent footnote on the signed-in page. It's
+             only news to someone who hasn't used Margin yet, so it lives
+             here, where that person is. -->
+        <p class="auth-note">Lookups come from a free dictionary. Saved words sync to your account and follow you across devices.</p>
       </div>
     </section>
 
     <div id="app-content" hidden>
-      <!-- Signed-in account strip. -->
-      <div class="account-bar">
-        <span id="account-email" class="account-email"></span>
-        <button id="sign-out" type="button" class="btn-signout">Sign out</button>
-      </div>
-
-      <!-- Book this word came from. Value is remembered between sessions.
-           book-select is a quick-pick from the library (added order) --
-           choosing one just fills the text input below, so typing a book
-           that isn't in the library still works exactly as before. -->
-      <div class="book-row book-row-reading">
-        <label for="book">Reading</label>
-        <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
-        <select id="book-select" class="book-filter" hidden aria-label="Pick from your library">
-          <option value="">Library…</option>
-        </select>
-      </div>
-
-      <!-- The sentence from the book itself, as opposed to `example` -- the
-           dictionary/AI's own generic example -- below. Optional, and cleared
-           after each save since it's specific to one word, not remembered
-           between sessions like "Reading" above. -->
-      <div class="book-row">
-        <label for="context-sentence">Sentence</label>
-        <input id="context-sentence" type="text" placeholder="optional — the line where you found it" autocomplete="off" />
-      </div>
-
-      <!-- The lookup bar -->
+      <!-- The lookup bar. First thing on the page now: everything else here
+           is context for a word you haven't caught yet. -->
       <div class="lookup">
         <div class="word-field">
           <input id="word" type="text" placeholder="a word…" autocomplete="off"
@@ -796,28 +860,49 @@
         <button id="go">Look up</button>
       </div>
 
+      <!-- Book this word came from — sits under the lookup bar, since it's
+           context for the word rather than the thing you came here to do.
+           Value is remembered between sessions. book-select is a quick-pick
+           from the library (added order) -- choosing one just fills the text
+           input, so typing a book that isn't in the library still works
+           exactly as before, and its "Add a book…" option is now the only
+           way into the Library screen (the old button beside "Saved words"
+           is gone). -->
+      <div class="book-row book-row-reading">
+        <label for="book">Reading</label>
+        <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+        <select id="book-select" class="book-filter" aria-label="Pick from your library">
+          <option value="">Library…</option>
+          <option value="__add__">Add a book…</option>
+        </select>
+      </div>
+
       <!-- One of: idle hint / loading / error / the card -->
       <div id="out">
         <p class="status">Type, speak, or scan a word above.</p>
       </div>
 
-      <p class="foot">
-        Lookups come from a free dictionary. Saved words sync to your account and follow you across devices.
-      </p>
-
-      <!-- Saved list: loads on open, filterable by book, each entry deletable. -->
+      <!-- Saved list: collapsed by default so the page ends at the capture
+           tool; opens to the filter + the full list. -->
       <section class="saved-section">
         <div class="saved-header">
-          <h2 class="saved-title">Saved words</h2>
-          <div class="saved-header-actions">
+          <h2 class="saved-title">
+            <button id="saved-toggle" type="button" class="saved-toggle" aria-expanded="false" aria-controls="saved-panel">
+              <span>Saved words</span>
+              <span id="saved-count" class="saved-count"></span>
+              <span id="saved-toggle-caret" class="saved-caret">▸</span>
+            </button>
+          </h2>
+          <button id="practice-open" type="button" class="btn-practice" hidden>Practice</button>
+        </div>
+        <div id="saved-panel" hidden>
+          <div class="saved-filter-row">
             <select id="book-filter" class="book-filter">
               <option value="">All books</option>
             </select>
-            <button id="library-open" type="button" class="btn-practice">Library</button>
-            <button id="practice-open" type="button" class="btn-practice" hidden>Practice</button>
           </div>
+          <div id="saved-list"></div>
         </div>
-        <div id="saved-list"></div>
       </section>
 
       <!-- Flashcards + quiz, scoped to whatever the book filter above is set to. -->
@@ -874,13 +959,16 @@
       currentSession = null;
       $("app-content").hidden = true;
       $("auth-section").hidden = false;
+      $("sign-out").hidden = true;
     }
 
     function showSignedIn(session) {
       currentSession = session;
       $("auth-section").hidden = true;
       $("app-content").hidden = false;
-      $("account-email").textContent = session.user.email;
+      // Sign out lives in the masthead now, outside #app-content, so it has
+      // to be shown/hidden explicitly with the signed-in state.
+      $("sign-out").hidden = false;
       // Saved words are per-account now, so (re)load them the moment we know
       // who's signed in — on initial load and again after a fresh sign-in.
       refreshSavedList();
@@ -1508,8 +1596,43 @@
           <div class="headword">${escapeHtml(w.word)}</div>
           ${pronunciation}
           ${toggle}
+          ${renderSentenceField()}
           <div id="tab-body">${activeTab === "ai" ? renderAIBody() : renderDictionaryBody(w)}</div>
         </article>`;
+    }
+
+    // The reader's own line from the book, per word. Deliberately outside
+    // #tab-body so switching Dictionary/AI doesn't wipe what's been typed;
+    // it only resets when a new card is built, which is exactly right --
+    // a new word means a new sentence. Collapsed to a link until used.
+    // sentenceDraft mirrors the input's value so it survives those rebuilds.
+    let sentenceDraft = "";
+    let sentenceOpen = false;
+
+    function renderSentenceField() {
+      const typed = sentenceDraft.trim();
+      if (!sentenceOpen && !typed) {
+        return `<div class="sentence-field">
+          <button type="button" id="sentence-open" class="btn-sentence">+ Add the line from your book</button>
+        </div>`;
+      }
+      return `<div class="sentence-field">
+        <label class="sentence-label" for="context-sentence">The line from your book</label>
+        <input id="context-sentence" type="text" value="${escapeHtml(sentenceDraft)}"
+               placeholder="optional — the line where you found it" autocomplete="off" />
+      </div>`;
+    }
+
+    function contextSentenceValue() {
+      const el = $("context-sentence");
+      return (el ? el.value : sentenceDraft).trim();
+    }
+
+    function clearContextSentence() {
+      sentenceDraft = "";
+      sentenceOpen = false;
+      const el = $("context-sentence");
+      if (el) el.value = "";
     }
 
     // Used for every state change *after* the initial renderCard() call —
@@ -1661,13 +1784,13 @@
           synonyms: aiResult.synonyms,
           antonyms: aiResult.antonyms,
           example: aiResult.example,
-          contextSentence: $("context-sentence").value.trim(),
+          contextSentence: contextSentenceValue(),
           book: $("book").value.trim(),
           source: "ai",
         });
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
-        $("context-sentence").value = "";
+        clearContextSentence();
         refreshSavedList();
         setTimeout(resetToIdle, 700);
       } catch (err) {
@@ -1692,13 +1815,13 @@
           synonyms: currentResult.synonyms,
           antonyms: currentResult.antonyms,
           example: currentResult.example,
-          contextSentence: $("context-sentence").value.trim(),
+          contextSentence: contextSentenceValue(),
           book: $("book").value.trim(),
           source: currentResult.source || "typed",
         });
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
-        $("context-sentence").value = "";
+        clearContextSentence();
         refreshSavedList();
         setTimeout(resetToIdle, 700);
       } catch (err) {
@@ -1728,13 +1851,13 @@
           synonyms: sense.synonyms,
           antonyms: sense.antonyms,
           example: sense.example,
-          contextSentence: $("context-sentence").value.trim(),
+          contextSentence: contextSentenceValue(),
           book: $("book").value.trim(),
           source: currentResult.source || "typed",
         });
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
-        $("context-sentence").value = "";
+        clearContextSentence();
         refreshSavedList();
         setTimeout(resetToIdle, 700);
       } catch (err) {
@@ -1757,11 +1880,11 @@
         await queuePendingCapture({
           word: currentResult.word,
           book: $("book").value.trim(),
-          contextSentence: $("context-sentence").value.trim(),
+          contextSentence: contextSentenceValue(),
         });
         btn.textContent = "Saved for later ✓";
         btn.classList.add("saved");
-        $("context-sentence").value = "";
+        clearContextSentence();
         refreshSavedList();
         setTimeout(resetToIdle, 700);
       } catch (err) {
@@ -1897,6 +2020,24 @@
       return [...pending, ...live].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
     }
 
+    // The whole list is folded away by default -- open/closed is remembered,
+    // so someone who works out of the list all day only opens it once.
+    const SAVED_OPEN_KEY = "margin.savedOpen";
+    let savedOpen = localStorage.getItem(SAVED_OPEN_KEY) === "1";
+
+    function applySavedOpenState() {
+      $("saved-panel").hidden = !savedOpen;
+      $("saved-toggle").setAttribute("aria-expanded", String(savedOpen));
+      $("saved-toggle-caret").textContent = savedOpen ? "▾" : "▸";
+    }
+
+    $("saved-toggle").addEventListener("click", () => {
+      savedOpen = !savedOpen;
+      localStorage.setItem(SAVED_OPEN_KEY, savedOpen ? "1" : "0");
+      applySavedOpenState();
+    });
+    applySavedOpenState();
+
     // Re-reads everything from storage and redraws the filter dropdown + the list.
     async function refreshSavedList() {
       let entries;
@@ -1906,6 +2047,9 @@
         $("saved-list").innerHTML = `<p class="saved-empty error">Couldn't load your saved words. Check your connection and try again.</p>`;
         return;
       }
+      // Always the total, never the filtered subset: the filter only exists
+      // while the list is open, and this number is mostly read while it's shut.
+      $("saved-count").textContent = entries.length ? entries.length : "";
       populateBookFilter(entries);
       const shown = bookFilter
         ? entries.filter(e => (e.book || "").split(",").map(b => b.trim()).includes(bookFilter))
@@ -1956,9 +2100,6 @@
               </span>
               <span class="saved-caret">${open ? "▾" : "▸"}</span>
             </button>
-            ${ e.pendingState ? "" : `<button class="saved-mastered-toggle" type="button" data-id="${e.id}" data-mastered="${isMastered}">${isMastered ? "Unmark" : "Learned it"}</button>` }
-            ${ isNotFound ? `<button class="saved-mastered-toggle saved-retry" type="button" data-id="${e.id}">Retry</button>` : "" }
-            <button class="saved-delete" type="button" data-id="${e.id}"${ e.pendingState ? ` data-pending="true"` : "" }>Delete</button>
           </div>
           ${ open ? `
             <div class="saved-detail">
@@ -1976,6 +2117,11 @@
                 ${ (e.antonyms||[]).length ? `<p class="chips-label">Antonyms</p>
                    <div class="chips">${e.antonyms.map(s=>chip(s,"ant")).join("")}</div>` : "" }
               `}
+              <div class="saved-detail-actions">
+                ${ e.pendingState ? "" : `<button class="saved-mastered-toggle" type="button" data-id="${e.id}" data-mastered="${isMastered}">${isMastered ? "Unmark" : "Learned it"}</button>` }
+                ${ isNotFound ? `<button class="saved-mastered-toggle saved-retry" type="button" data-id="${e.id}">Retry</button>` : "" }
+                <button class="saved-delete" type="button" data-id="${e.id}"${ e.pendingState ? ` data-pending="true"` : "" }>Delete</button>
+              </div>
             </div>` : "" }
         </div>
       `;
@@ -2011,10 +2157,9 @@
     // Elements hidden while a practice session is open, restored on close.
     function practiceToggleTargets() {
       return [
-        ...document.querySelectorAll(".book-row"), // both Reading and Sentence
+        ...document.querySelectorAll(".book-row"), // the Reading bookplate
         document.querySelector(".lookup"),
         out,
-        document.querySelector(".foot"),
         document.querySelector(".saved-section"),
       ];
     }
@@ -2329,10 +2474,9 @@
 
     function cameraToggleTargets() {
       return [
-        ...document.querySelectorAll(".book-row"), // both Reading and Sentence
+        ...document.querySelectorAll(".book-row"), // the Reading bookplate
         document.querySelector(".lookup"),
         out,
-        document.querySelector(".foot"),
         document.querySelector(".saved-section"),
       ];
     }
@@ -2833,10 +2977,9 @@
 
     function libraryToggleTargets() {
       return [
-        ...document.querySelectorAll(".book-row"), // both Reading and Sentence
+        ...document.querySelectorAll(".book-row"), // the Reading bookplate
         document.querySelector(".lookup"),
         out,
-        document.querySelector(".foot"),
         document.querySelector(".saved-section"),
       ];
     }
@@ -3124,25 +3267,23 @@
       } catch {
         return; // signed out, or a real fetch error -- leave the select as-is either way
       }
-      if (!books.length) {
-        select.hidden = true;
-        return;
-      }
       const ordered = [...books].sort((a, b) => new Date(a.addedAt) - new Date(b.addedAt));
+      // "Add a book…" is the way into the Library screen now that the button
+      // beside "Saved words" is gone -- so this select is never hidden, even
+      // with an empty library, or a new account could never reach it.
       select.innerHTML = `<option value="">Library…</option>`
+        + `<option value="__add__">Add a book…</option>`
         + ordered.map((b) => `<option value="${escapeHtml(b.title)}">${escapeHtml(b.title)}</option>`).join("");
-      select.hidden = false;
     }
 
     $("book-select").addEventListener("change", (e) => {
       const title = e.target.value;
+      e.target.value = "";
       if (!title) return;
+      if (title === "__add__") { openLibrarySection(); return; }
       $("book").value = title;
       $("book").dispatchEvent(new Event("input"));
-      e.target.value = "";
     });
-
-    $("library-open").addEventListener("click", openLibrarySection);
     $("library-section").addEventListener("click", (e) => {
       if (e.target.id === "library-close") { closeLibrarySection(); return; }
       if (e.target.id === "library-add") { renderLibraryChooser(); return; }
@@ -3206,6 +3347,18 @@
       if (saveSenseBtn) saveSense(Number(saveSenseBtn.dataset.senseIndex));
       const tabBtn = e.target.closest("[data-tab]");
       if (tabBtn) switchTab(tabBtn.dataset.tab);
+      if (e.target.id === "sentence-open") {
+        sentenceOpen = true;
+        const holder = e.target.closest(".sentence-field");
+        holder.outerHTML = renderSentenceField();
+        $("context-sentence").focus();
+      }
+    });
+
+    // Delegated, since the input is rebuilt with the card rather than living
+    // in the page permanently.
+    out.addEventListener("input", (e) => {
+      if (e.target.id === "context-sentence") sentenceDraft = e.target.value;
     });
 
     $("book-filter").addEventListener("change", (e) => {
