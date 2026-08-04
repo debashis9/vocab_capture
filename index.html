@@ -197,6 +197,16 @@
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
     @media (prefers-reduced-motion: reduce) { .btn-mic.listening { animation: none; } }
 
+    /* Shown while a scanned photo is paused in the background (the user
+       tapped a word to look it up but hasn't closed the scan) -- a visual
+       reminder that clicking scan again resumes it instead of starting a
+       fresh capture. */
+    .btn-scan { position: relative; }
+    .btn-scan.has-session::after {
+      content: ""; position: absolute; top: 2px; right: 2px;
+      width: 8px; height: 8px; border-radius: 50%; background: var(--oxblood);
+    }
+
     /* ---- States ---- */
     .status { margin: 26px 2px; color: var(--ink-soft); font-size: 15px; }
     .status.error { color: var(--oxblood); }
@@ -472,6 +482,29 @@
     .ocr-word-choice:hover, .ocr-word-choice:focus-visible {
       background: var(--oxblood-soft); outline: 2px solid var(--oxblood);
     }
+    /* Same shrink-wrap/percent-positioning idiom as .ocr-zoom-wrapper --
+       the drag-drawn selection box is positioned as a percent of this
+       viewport, so it only stays put if the viewport is exactly the
+       image's own rendered size. touch-action:none stops the browser's
+       own scroll/pan gestures from fighting the drag-to-select gesture. */
+    .crop-viewport {
+      position: relative; display: inline-block; touch-action: none;
+      border-radius: var(--radius); overflow: hidden; background: #000;
+    }
+    /* user-drag/user-select:none -- without these, a mousedown on the image
+       starts the browser's own native "drag this image" gesture, which
+       hijacks the pointer sequence so pointerup never reliably fires on
+       #crop-viewport and the selection box is left resizing on every
+       mousemove forever (no way to "stop" the drag). */
+    .crop-viewport img {
+      display: block; max-width: 100%; max-height: 60vh; width: auto; height: auto;
+      -webkit-user-drag: none; user-select: none;
+    }
+    .crop-box {
+      position: absolute; border: 2px dashed var(--oxblood);
+      background: rgba(138, 48, 51, 0.15);
+      pointer-events: none;
+    }
 
     /* ---- Auth (Supabase magic link) ---- */
     .auth-section { margin-top: 40px; }
@@ -603,7 +636,7 @@
       <!-- The lookup bar -->
       <div class="lookup">
         <div class="word-field">
-          <input id="word" type="text" placeholder="type a word…" autocomplete="off"
+          <input id="word" type="text" placeholder="a word…" autocomplete="off"
                  autocapitalize="none" spellcheck="false" enterkeyhint="search" />
           <button id="clear-word" type="button" class="btn-clear" aria-label="Clear" hidden>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -633,7 +666,7 @@
 
       <!-- One of: idle hint / loading / error / the card -->
       <div id="out">
-        <p class="status">Type a word above and press Enter.</p>
+        <p class="status">Type, speak, or scan a word above.</p>
       </div>
 
       <p class="foot">
@@ -778,9 +811,16 @@
     const AI_ENABLED = true;
     const AI_ENDPOINT = "https://margin-llm-proxy.debashis9.workers.dev/define-gemma";
     const OCR_ENDPOINT = "https://margin-llm-proxy.debashis9.workers.dev/ocr";
-    // Long edge of the image actually sent for OCR -- legible enough for
-    // real text, small enough to keep the upload/request reasonable.
+    // Long edge of the FINAL, already-cropped region actually sent for OCR --
+    // legible enough for real text, small enough to keep the upload/request
+    // reasonable and the output-token count (hence latency) proportional to
+    // how much was actually selected.
     const OCR_MAX_DIMENSION = 1600;
+    // Long edge of the working canvas used for the crop-selection screen --
+    // bigger than OCR_MAX_DIMENSION on purpose, so a small cropped region
+    // still has real detail to work with instead of inheriting the
+    // whole-page cap.
+    const CROP_SOURCE_MAX_DIMENSION = 2400;
 
     // Remember the current book between sessions (simple key/value, not the word list).
     const BOOK_KEY = "margin.book";
@@ -1251,7 +1291,7 @@
       aiError = null;
       activeTab = "dictionary";
       clearTimeout(autoSearchTimer);
-      out.innerHTML = `<p class="status">Type a word above and press Enter.</p>`;
+      out.innerHTML = `<p class="status">Type, speak, or scan a word above.</p>`;
       $("word").value = "";
       updateClearButton();
       $("word").focus();
@@ -1328,7 +1368,7 @@
         });
 
         return `
-          <p class="senses-hint">${senses.length} senses found${
+          <p class="senses-hint">${senses.length} meanings found${
             order.length > 1 ? ` across ${order.length} parts of speech` : ""
           } — save the one that fits.</p>
           ${order.map(pos => `
@@ -1343,7 +1383,7 @@
                     ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
                     ${ s.synonyms.length ? `<div class="chips">${s.synonyms.map(x=>chip(x)).join("")}</div>` : "" }
                     <div class="sense-save-row">
-                      <button type="button" class="btn-save-sense" data-sense-index="${i}">Save this sense</button>
+                      <button type="button" class="btn-save-sense" data-sense-index="${i}">Save this meaning</button>
                     </div>
                   </li>`;
                 }).join("")}
@@ -1517,7 +1557,7 @@
       } catch (err) {
         btn.disabled = false;
         btn.textContent = "Couldn't save — try again";
-        setTimeout(() => { btn.textContent = "Save this sense"; }, 3000);
+        setTimeout(() => { btn.textContent = "Save this meaning"; }, 3000);
       }
     }
 
@@ -1709,7 +1749,7 @@
     function renderSavedList(entries) {
       const list = $("saved-list");
       if (!entries.length) {
-        list.innerHTML = `<p class="saved-empty">No saved words yet.</p>`;
+        list.innerHTML = `<p class="saved-empty">Nothing in the margin yet — look up a word to start.</p>`;
         return;
       }
       const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
@@ -1725,7 +1765,7 @@
               <span class="saved-word-line">
                 <span class="saved-word-row">
                   <span class="saved-word">${escapeHtml(e.word)}</span>
-                  ${ isMastered ? `<span class="mastered-badge">Mastered</span>` : "" }
+                  ${ isMastered ? `<span class="mastered-badge">Learned</span>` : "" }
                   ${ isPending ? `<span class="mastered-badge pending-badge">Pending</span>` : "" }
                   ${ isNotFound ? `<span class="mastered-badge notfound-badge">Not found</span>` : "" }
                 </span>
@@ -1733,7 +1773,7 @@
               </span>
               <span class="saved-caret">${open ? "▾" : "▸"}</span>
             </button>
-            ${ e.pendingState ? "" : `<button class="saved-mastered-toggle" type="button" data-id="${e.id}" data-mastered="${isMastered}">${isMastered ? "Unmark" : "Master it"}</button>` }
+            ${ e.pendingState ? "" : `<button class="saved-mastered-toggle" type="button" data-id="${e.id}" data-mastered="${isMastered}">${isMastered ? "Unmark" : "Learned it"}</button>` }
             ${ isNotFound ? `<button class="saved-mastered-toggle saved-retry" type="button" data-id="${e.id}">Retry</button>` : "" }
             <button class="saved-delete" type="button" data-id="${e.id}"${ e.pendingState ? ` data-pending="true"` : "" }>Delete</button>
           </div>
@@ -2012,6 +2052,8 @@
       if (e.target.id === "camera-choose-photo") { $("camera-file-input").click(); return; }
       if (e.target.id === "camera-capture") { captureFromVideo(); return; }
       if (e.target.id === "camera-cancel") { renderCameraChooser(); return; }
+      if (e.target.id === "crop-confirm") { scanCroppedRegion(currentCropCanvas, cropSelection); return; }
+      if (e.target.id === "crop-whole") { scanCroppedRegion(currentCropCanvas, null); return; }
       const wordBtn = e.target.closest(".ocr-word-choice");
       if (wordBtn) { selectOcrWord(wordBtn.dataset.word); return; }
       if (e.target.id === "camera-retry") { renderCameraChooser(); return; }
@@ -2072,6 +2114,29 @@
 
     let cameraStream = null; // the active getUserMedia stream, if any
 
+    // Whether a scanned photo is paused in the background -- true from the
+    // moment the tap-a-word screen first renders until the scan is
+    // genuinely closed (not just "a word was tapped"). Lets someone tap a
+    // word, look at the result, then come back to the SAME photo to tap a
+    // different word without re-scanning or re-cropping from scratch.
+    let ocrSessionOpen = false;
+    // AbortController for the in-flight /ocr stream, if any -- only
+    // actually cancelled when the scan is genuinely closed (the "x" button,
+    // or Cancel from the crop/live-preview screens), not when a word is
+    // tapped. Tapping a word early shouldn't both strand the rest of the
+    // stream running invisibly in the background *and* leave no way to see
+    // what it would have found -- closing it only on a real exit means "I
+    // have what I need" is a deliberate choice, not a side effect of
+    // glancing at one result.
+    let ocrStreamController = null;
+
+    function setOcrSessionOpen(open) {
+      ocrSessionOpen = open;
+      $("scan").classList.toggle("has-session", open);
+      $("scan").setAttribute("aria-label", open ? "Resume scanned photo" : "Scan a page");
+      $("scan").title = open ? "Resume scanned photo" : "Scan a page";
+    }
+
     function cameraToggleTargets() {
       return [
         document.querySelector(".book-row"),
@@ -2082,9 +2147,9 @@
       ];
     }
 
-    // getUserMedia hygiene: every exit path (Cancel, a word tapped, an
-    // error, or once a still frame is captured) calls this one function
-    // rather than stopping tracks inline in four separate places.
+    // getUserMedia hygiene: every exit path (Cancel, an error, or once a
+    // still frame is captured) calls this one function rather than
+    // stopping tracks inline in several separate places.
     function stopCamera() {
       cameraStream?.getTracks().forEach((t) => t.stop());
       cameraStream = null;
@@ -2093,11 +2158,28 @@
     function openCameraSection() {
       cameraToggleTargets().forEach((el) => (el.hidden = true));
       $("camera-section").hidden = false;
-      renderCameraChooser();
+      // A paused session resumes exactly where it was (the DOM under
+      // #camera-body was never torn down) -- only start over from the
+      // chooser if there's nothing to resume.
+      if (!ocrSessionOpen) renderCameraChooser();
     }
 
+    // The one real exit: aborts any in-flight stream and discards the
+    // session, then hides the whole scan UI. Used by the "x" close button
+    // and Cancel -- NOT by selectOcrWord(), which needs to hide the scan UI
+    // without discarding it (see pauseCameraSection below).
     function closeCameraSection() {
       stopCamera();
+      if (ocrStreamController) { ocrStreamController.abort(); ocrStreamController = null; }
+      setOcrSessionOpen(false);
+      $("camera-section").hidden = true;
+      cameraToggleTargets().forEach((el) => (el.hidden = false));
+    }
+
+    // Hides the scan UI to show a lookup result WITHOUT discarding the
+    // session or aborting an in-flight stream -- openCameraSection() will
+    // resume right back into it.
+    function pauseCameraSection() {
       $("camera-section").hidden = true;
       cameraToggleTargets().forEach((el) => (el.hidden = false));
     }
@@ -2110,8 +2192,7 @@
           <h2 class="saved-title">Scan a page</h2>
           <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
         </div>
-        <p class="practice-lede">Point your camera at a page, or upload a photo, then tap the word you don't know.</p>
-        <p class="camera-tip"><strong>Capture a paragraph or a few lines, not a whole page</strong> — a full page can take over a minute to process and gives smaller, harder-to-tap words.</p>
+        <p class="practice-lede">Point your camera at a page, or upload a photo. You'll pick a paragraph or a few lines to scan next.</p>
         <div class="practice-mode-buttons">
           <button id="camera-take-photo" type="button">Take a photo</button>
           <button id="camera-choose-photo" type="button">Choose a photo</button>
@@ -2167,6 +2248,10 @@
     }
 
     function renderCameraError(message) {
+      // An error screen has nothing worth resuming -- "Try again" starts
+      // fresh anyway, so this shouldn't leave the scan button's "resume"
+      // badge showing.
+      setOcrSessionOpen(false);
       $("camera-body").innerHTML = `
         <div class="practice-head">
           <h2 class="saved-title">Scan a page</h2>
@@ -2180,15 +2265,19 @@
     }
 
     // Shared by both capture methods (live video frame or an uploaded
-    // image) -- draws to a downscaled canvas, uploads it for OCR, and
-    // hands the result to the word-overlay view. `source` is anything
+    // image) -- draws to a working canvas at CROP_SOURCE_MAX_DIMENSION (not
+    // yet the OCR upload -- that downscale happens later, after cropping)
+    // and hands off to the crop-selection screen. `source` is anything
     // drawImage() accepts (a <video> or an <img>/ImageBitmap).
+    let currentCropCanvas = null; // the full (uncropped) working canvas for the current capture
+    let cropSelection = null; // {left, top, width, height} in percent, or null (= whole photo)
+
     async function processCapturedImage(source) {
       stopCamera(); // safe even if source wasn't the live video -- no-op then
 
       const naturalWidth = source.videoWidth || source.naturalWidth || source.width;
       const naturalHeight = source.videoHeight || source.naturalHeight || source.height;
-      const scale = Math.min(1, OCR_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
+      const scale = Math.min(1, CROP_SOURCE_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
       const width = Math.round(naturalWidth * scale);
       const height = Math.round(naturalHeight * scale);
 
@@ -2197,14 +2286,153 @@
       canvas.height = height;
       canvas.getContext("2d").drawImage(source, 0, 0, width, height);
 
+      currentCropCanvas = canvas;
+      renderCropChooser(canvas);
+    }
+
+    // ---- crop-selection screen: drag over a paragraph, or scan the whole photo ----
+    function renderCropChooser(canvas) {
+      cropSelection = null;
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      $("camera-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Frame a paragraph</h2>
+          <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
+        </div>
+        <p class="camera-tip"><strong>Drag over a paragraph or a few lines</strong> — a smaller area scans faster and gives bigger, easier-to-tap words.</p>
+        <div id="crop-viewport" class="crop-viewport">
+          <img id="crop-image" src="${dataUrl}" width="${canvas.width}" height="${canvas.height}" alt="Captured page" draggable="false" />
+          <div id="crop-box" class="crop-box" hidden></div>
+        </div>
+        <div class="practice-mode-buttons">
+          <button id="crop-confirm" type="button" disabled>Scan selected area</button>
+          <button id="crop-whole" type="button" class="btn-practice-nav">Scan whole photo</button>
+        </div>
+      `;
+      wireCropSelection();
+    }
+
+    // Drag-to-draw, not drag-to-adjust-handles -- simplest of the real
+    // options (same reasoning as double-tap-instead-of-pinch for zoom
+    // above), since redrawing is just dragging again. Percent-of-viewport
+    // coordinates, same idiom as the word-overlay box math below, so the
+    // selection stays aligned regardless of the image's actual rendered size.
+    function wireCropSelection() {
+      const viewport = $("crop-viewport");
+      const box = $("crop-box");
+      const confirmBtn = $("crop-confirm");
+      let dragging = false;
+      let startX, startY;
+
+      const percentPos = (e) => {
+        const rect = viewport.getBoundingClientRect();
+        return {
+          x: Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)),
+          y: Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100)),
+        };
+      };
+      const applyBoxStyle = (x1, y1, x2, y2) => {
+        box.style.left = Math.min(x1, x2) + "%";
+        box.style.top = Math.min(y1, y2) + "%";
+        box.style.width = Math.abs(x2 - x1) + "%";
+        box.style.height = Math.abs(y2 - y1) + "%";
+      };
+
+      const finishDrag = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        const p = percentPos(e);
+        const left = Math.min(startX, p.x);
+        const top = Math.min(startY, p.y);
+        const width = Math.abs(p.x - startX);
+        const height = Math.abs(p.y - startY);
+        // A tap or a tiny accidental drag isn't a real selection.
+        if (width < 3 || height < 3) {
+          box.hidden = true;
+          cropSelection = null;
+          confirmBtn.disabled = true;
+          return;
+        }
+        cropSelection = { left, top, width, height };
+        confirmBtn.disabled = false;
+      };
+
+      viewport.addEventListener("pointerdown", (e) => {
+        // Without this, a mousedown on the <img> starts the browser's own
+        // native drag-the-image gesture, which can swallow the rest of this
+        // pointer sequence (pointerup never fires on this element, leaving
+        // `dragging` stuck true and the box resizing on every later
+        // mousemove with no way to stop it).
+        e.preventDefault();
+        viewport.setPointerCapture(e.pointerId);
+        const p = percentPos(e);
+        startX = p.x; startY = p.y;
+        dragging = true;
+        confirmBtn.disabled = true;
+        box.hidden = false;
+        applyBoxStyle(startX, startY, startX, startY);
+      });
+      viewport.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        const p = percentPos(e);
+        applyBoxStyle(startX, startY, p.x, p.y);
+      });
+      viewport.addEventListener("pointerup", finishDrag);
+      // Safety net: if the pointer sequence ends abnormally (e.g. capture
+      // lost, browser gesture interrupts it) rather than via a clean
+      // pointerup, this still resets `dragging` instead of leaving the box
+      // stuck following the pointer indefinitely.
+      viewport.addEventListener("pointercancel", finishDrag);
+    }
+
+    // Crops the ORIGINAL working canvas (not a re-downscaled copy) to the
+    // selected percent-region, then applies OCR_MAX_DIMENSION only to that
+    // cropped result -- a paragraph-sized crop keeps far more real detail
+    // per word than the old approach of downscaling the whole page up front.
+    // selection === null means "scan whole photo" (crop-whole button).
+    async function scanCroppedRegion(canvas, selection) {
+      const sx = selection ? Math.round((selection.left / 100) * canvas.width) : 0;
+      const sy = selection ? Math.round((selection.top / 100) * canvas.height) : 0;
+      const sw = selection ? Math.round((selection.width / 100) * canvas.width) : canvas.width;
+      const sh = selection ? Math.round((selection.height / 100) * canvas.height) : canvas.height;
+
+      const scale = Math.min(1, OCR_MAX_DIMENSION / Math.max(sw, sh));
+      const width = Math.round(sw * scale);
+      const height = Math.round(sh * scale);
+
+      const cropped = document.createElement("canvas");
+      cropped.width = width;
+      cropped.height = height;
+      cropped.getContext("2d").drawImage(canvas, sx, sy, sw, sh, 0, 0, width, height);
+
       // The displayed photo and the photo the model actually saw must be
       // pixel-dimension-identical, or the overlay math misaligns -- so the
       // same canvas' data URL is what gets shown later, at this same
       // width/height, not the source's original resolution.
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      const dataUrl = cropped.toDataURL("image/jpeg", 0.8);
       const base64 = dataUrl.split(",")[1];
 
       renderCameraLoading();
+      await streamOcrWords(dataUrl, width, height, base64);
+    }
+
+    // Reads the /ocr response as a stream of SSE word events (one word at a
+    // time) instead of a single blocking JSON response, so tappable words
+    // appear as they're recognized rather than after the whole region
+    // finishes -- reuses the same \n\n-frame + "data:"-line SSE shape the
+    // Worker's own lookupGemma() reads from Gemini, one level up (this
+    // stream is ours, not Gemini's directly, so no \r\n quirk here).
+    async function streamOcrWords(dataUrl, baseWidth, baseHeight, base64) {
+      let sawAnyWord = false;
+      let shellRendered = false;
+
+      // Own controller per call, stashed in the module-level variable so
+      // closeCameraSection() can abort it later -- e.g. once a word is
+      // tapped, if the user closes the scan entirely instead of coming
+      // back to it, there's no reason to keep spending Gemini time/quota
+      // streaming words nobody will see.
+      const controller = new AbortController();
+      ocrStreamController = controller;
 
       try {
         const res = await fetch(OCR_ENDPOINT, {
@@ -2214,61 +2442,103 @@
             "Authorization": "Bearer " + currentSession.access_token,
           },
           body: JSON.stringify({ image: base64 }),
+          signal: controller.signal,
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || "Scan failed (HTTP " + res.status + ")");
         }
-        const data = await res.json();
-        renderCameraWordOverlay(dataUrl, width, height, data.words || []);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          let sep;
+          while ((sep = buffer.indexOf("\n\n")) !== -1) {
+            const frame = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+            if (!dataLine) continue;
+            const jsonStr = dataLine.slice(5).trim();
+            if (!jsonStr) continue;
+
+            const event = JSON.parse(jsonStr);
+            if (event.error) throw new Error(event.error);
+            if (event.word) {
+              if (!shellRendered) {
+                renderCameraWordOverlayShell(dataUrl, baseWidth, baseHeight);
+                shellRendered = true;
+                setOcrSessionOpen(true);
+              }
+              sawAnyWord = true;
+              appendOcrWordButton(event.word);
+            }
+          }
+        }
       } catch (err) {
-        const message = navigator.onLine
-          ? "Couldn't read that page. Try again, or make sure the photo is clear and well-lit."
-          : "You're offline — scanning a page needs an internet connection. Try again once you're back online.";
+        // A deliberate abort (scan was closed) isn't a failure -- there's
+        // no one left looking at this screen to show an error to.
+        if (err.name === "AbortError") return;
+        const message = !navigator.onLine
+          ? "You're offline — scanning a page needs an internet connection. Try again once you're back online."
+          : "Couldn't read that page. Try again, or make sure the photo is clear and well-lit.";
         renderCameraError(message);
+        return;
+      } finally {
+        if (ocrStreamController === controller) ocrStreamController = null;
+      }
+
+      if (!sawAnyWord) {
+        renderCameraError("No words found. Try again, or make sure the photo is clear and well-lit.");
       }
     }
 
-    // Renders the captured photo with a tappable button overlaid on every
-    // recognized word, plus double-tap-to-zoom. Percent-based positioning
-    // (rather than fixed pixels computed from baseWidth/baseHeight) so the
-    // overlay stays aligned with the image at whatever size it actually
-    // renders at -- the model's box coordinates are already normalized
-    // 0-1000 relative to the full image, so converting straight to a
-    // percentage of the wrapper needs no pixel math at all. baseWidth/
-    // baseHeight are only used as the <img>'s width/height attributes, to
-    // hint its aspect ratio before it loads (avoids layout shift).
-    function renderCameraWordOverlay(dataUrl, baseWidth, baseHeight, words) {
-      if (words.length === 0) {
-        renderCameraError("No words found. Try again, or make sure the photo is clear and well-lit.");
-        return;
-      }
-
-      const overlays = words.map((w) => {
-        const [ymin, xmin, ymax, xmax] = w.box;
-        const left = (xmin / 1000) * 100;
-        const top = (ymin / 1000) * 100;
-        const width = ((xmax - xmin) / 1000) * 100;
-        const height = ((ymax - ymin) / 1000) * 100;
-        return `<button type="button" class="ocr-word-choice" data-word="${escapeHtml(w.text)}"
-          style="left:${left}%; top:${top}%; width:${width}%; height:${height}%;"
-          aria-label="${escapeHtml(w.text)}"></button>`;
-      }).join("");
-
+    // Renders the captured photo plus an (initially empty) container for
+    // per-word buttons -- appendOcrWordButton() fills it in as words stream
+    // in. Percent-based positioning (rather than fixed pixels computed from
+    // baseWidth/baseHeight) so the overlay stays aligned with the image at
+    // whatever size it actually renders at -- the model's box coordinates
+    // are already normalized 0-1000 relative to the full image, so
+    // converting straight to a percentage of the wrapper needs no pixel
+    // math at all. baseWidth/baseHeight are only used as the <img>'s
+    // width/height attributes, to hint its aspect ratio before it loads
+    // (avoids layout shift).
+    function renderCameraWordOverlayShell(dataUrl, baseWidth, baseHeight) {
       $("camera-body").innerHTML = `
         <div class="practice-head">
           <h2 class="saved-title">Tap a word to look it up</h2>
           <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
         </div>
-        <p class="practice-hint">Double-tap the photo to zoom in for smaller words.</p>
+        <p class="practice-hint">Words appear as they're recognized — tap one, or double-tap the photo to zoom in.</p>
         <div id="ocr-viewport" class="ocr-viewport">
           <div id="ocr-zoom-wrapper" class="ocr-zoom-wrapper">
             <img src="${dataUrl}" width="${baseWidth}" height="${baseHeight}" alt="Captured page" />
-            ${overlays}
           </div>
         </div>
       `;
       wireOcrZoom();
+    }
+
+    // Built via the DOM API (not an innerHTML string) so there's no need
+    // for escapeHtml here -- dataset/style/attribute assignment can't be
+    // interpreted as markup the way string concatenation could.
+    function appendOcrWordButton(w) {
+      const [ymin, xmin, ymax, xmax] = w.box;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ocr-word-choice";
+      btn.dataset.word = w.text;
+      btn.style.left = (xmin / 1000) * 100 + "%";
+      btn.style.top = (ymin / 1000) * 100 + "%";
+      btn.style.width = ((xmax - xmin) / 1000) * 100 + "%";
+      btn.style.height = ((ymax - ymin) / 1000) * 100 + "%";
+      btn.setAttribute("aria-label", w.text);
+      $("ocr-zoom-wrapper").appendChild(btn);
     }
 
     // Double-tap toggles ~2x zoom centered on the tap point. A double-tap
@@ -2300,9 +2570,13 @@
     // so unlike the mic button (which only fills the word field and waits
     // for Enter/Look up), this triggers the lookup directly, matching how
     // #go's own click handler already does it.
+    // Pauses rather than closes the scan -- the photo (and any words still
+    // streaming in) stays intact in the background, so tapping the scan
+    // button again picks right back up instead of re-scanning from scratch
+    // if this word wasn't the one they were after.
     function selectOcrWord(word) {
       $("word").value = word;
-      closeCameraSection();
+      pauseCameraSection();
       clearTimeout(autoSearchTimer);
       lookup(word);
     }
