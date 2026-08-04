@@ -206,8 +206,7 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   - **Preconnect hints** for the dictionary API, the AI Worker, and Supabase, so the first
     request of a session isn't also paying DNS/TLS handshake cost on top of the real round trip.
 
-- **Offline mode is implemented on the `future/ocr-offline-library` branch (committed
-  2026-08-02, not yet merged to `main`).** The saved list and flashcards/quiz now fall back to
+- **Offline mode (built 2026-08-02 on `future/ocr-offline-library`, since merged to `main`).** The saved list and flashcards/quiz now fall back to
   a local IndexedDB mirror (`saveEntriesMirror`, refreshed on every successful *unfiltered*
   Supabase read — a filtered, single-book read deliberately does NOT refresh it, or it would
   wipe out every other book's cached entries the next time someone has a book filter selected)
@@ -404,28 +403,81 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   an actual physical book**, and the `books-table.sql` migration hasn't been run yet — both need
   debashis9, same as OCR's own path to verification.
 
+- **A mobile-usability round, 2026-08-04, from debashis9's first real phone test of the merged
+  app** (everything above is now on `main` and pushed — the `future/ocr-offline-library` branch
+  still exists but `main` is the live one). All five were found by using it on a phone, none by
+  automated testing, which had only ever measured desktop-width layouts:
+  - **The crop screen's "Scan selected area"/"Scan whole photo" buttons sat below the fold**, and
+    the only way to scroll down to them was dragging a finger across the photo — which starts a
+    new selection and wipes the one just drawn, so you could never actually reach the buttons
+    with a selection intact. Three changes together: the buttons are now a `position: sticky;
+    bottom: 0` bar (`.crop-actions`) so they're always on screen; `renderCropChooser()` and
+    `openCameraSection()` scroll the scan UI to the top of the viewport (it's the last section on
+    the page, so it opened below the fold); and on ≤520px the photo is capped at 50vh with
+    tighter section margins, so header + tip + photo + buttons all fit a 390×780 screen at once.
+  - **A stray tap on the photo no longer clears an existing crop selection** — `wireCropSelection`
+    keeps the committed selection and redraws it (`showCommittedSelection()`) when a drag turns
+    out to be a tap or under the 3% minimum, instead of dropping it.
+  - **The library quick-pick `<select>` overflowed the screen.** A `<select>` sizes itself to its
+    widest `<option>`, so one long book title stretched it past the right edge (the page scrolled
+    sideways) and squeezed the "Reading" input next to it down to nothing — which is why a picked
+    book looked like it "wasn't reflected" anywhere: it *was* filled in, into a field a few pixels
+    wide. Now `.book-filter` is capped (`max-width: 150px`, ellipsized label) and the Reading
+    row's copy is a fixed 104px; on ≤520px the Reading row wraps so the label + dropdown share
+    line one and the text input gets the whole of line two. Same cap fixes the saved-list book
+    filter, which had the identical problem. Option label shortened "From library…" → "Library…".
+  - **The lookup row wrapped too**: on a 390px screen the word field, mic, scan and "Look up" all
+    sharing one line left the field itself ~119px (about five characters). The field now takes
+    the full line with the three buttons below it, `min-height: 46px` so they stay real touch
+    targets once they no longer stretch to the field's height.
+  - **The OCR word highlight no longer covers the word.** It used to fill the whole word box with
+    opaque `--oxblood-soft` on hover/focus, hiding the exact thing you're trying to read (worse on
+    a curved page, where you need the neighbouring letters to be sure you tapped the right word) —
+    and since a phone has no hover, nothing marked which words were even tappable. Now: a
+    pen-like underline at rest on every recognized word, a *translucent* wash (rgba, never a solid
+    fill) on press/hover/focus, a branded `-webkit-tap-highlight-color` instead of Chrome's grey
+    box, and a `.looked-up` class that keeps a word marked after you tap it, so returning to the
+    paused photo shows what's already been looked up. Colours are hardcoded rgba rather than theme
+    variables on purpose — the backdrop here is always the photo, not the app background.
+  - **Streaming words now report progress.** The overlay shows a live "Reading the page… N words
+    so far" line (pulsing dot) that switches to a green-dot "N words found — tap one to look it
+    up" when the stream ends, and each word flashes briefly (`.just-arrived`) as it lands, so
+    progress is visible on the photo itself. Previously a long scan gave no sign it was still
+    working — the only way to tell was to tap something and see.
+  - Also fixed in passing: `cameraToggleTargets()`/`practiceToggleTargets()`/`libraryToggleTargets()`
+    used `querySelector(".book-row")`, which only ever hid the *first* row — so the "Sentence"
+    field stayed visible behind the scan/practice/library screens. Now `querySelectorAll`.
+  - Verified in a headless Chromium at a 390×780 mobile viewport against the real `index.html`
+    (Supabase stubbed): no horizontal overflow, both dropdowns inside the screen, crop buttons
+    on screen without scrolling, a drag-then-tap keeping its selection, the resting word marker
+    having no fill, the progress line counting up and reaching its done state, and a tapped word
+    staying marked. **Not verified: a real phone** — that's debashis9's next test.
+
 ## Picking up next session
-- **Book scanning/library is built (2026-08-04) but needs two things from debashis9 before
-  it's verified live — pick up exactly here:**
-  1. **Run `supabase/sql/books-table.sql` in the Supabase SQL editor.** Nothing about the
-     Library screen will actually persist until this table exists — I can't run it myself, same
-     as every other file in `supabase/sql/`.
-  2. **A real hands-on test with an actual book**: open the app, tap Library → Add a book, take
-     a real photo of a book's back cover or barcode, and confirm the ISBN/title/author come back
-     right and the cover art loads. This is the one piece only debashis9 can do — everything
-     checkable without a real photo/real database has already been checked (see the
+- **Everything is merged to `main` and pushed.** The three parked features (offline mode, OCR,
+  book library) all landed on `main`; `future/ocr-offline-library` is now a leftover branch, not
+  where work happens.
+- **Next: re-test on the phone after the 2026-08-04 mobile-usability round** (see the entry at
+  the end of Current state). Specifically worth a look: the crop screen's sticky Scan buttons,
+  the Reading row's wrapped layout with the library dropdown, and whether the new underline/
+  translucent-wash word marking is actually readable on a real photographed page — the marker
+  colours were picked against synthetic test images, so real paper is the honest test.
+  1. **Still open: run `supabase/sql/books-table.sql` in the Supabase SQL editor.** Nothing about
+     the Library screen will actually persist until this table exists — I can't run it myself,
+     same as every other file in `supabase/sql/`.
+  2. **Still open: a real hands-on test with an actual book**: open the app, tap Library → Add a
+     book, take a real photo of a book's back cover or barcode, and confirm the ISBN/title/author
+     come back right and the cover art loads. This is the one piece only debashis9 can do —
+     everything checkable without a real photo/real database has already been checked (see the
      verification paragraph above).
-  3. Once that checks out, all three originally-parked features on `future/ocr-offline-library`
-     (offline mode, OCR, book library) are done and verified — decide whether to merge to
-     `main`. The Android-phone OCR test remains optional/deferred, not a blocker (see below).
-  4. `sw.js` is at `v36`. The Worker (`worker/src/index.js`) is deployed live and matches what's
+  3. `sw.js` is at `v38`. The Worker (`worker/src/index.js`) is deployed live and matches what's
      committed — no pending redeploy.
-  5. Decide whether to test OCR on a real Android phone (optional — "Choose a photo" with a
+  4. Decide whether to test OCR on a real Android phone (optional — "Choose a photo" with a
      phone-taken picture has already fully exercised OCR recognition/crop/streaming; only the
      live-camera-specific UX, getUserMedia permission prompt and viewfinder, remains untested,
      and debashis9 has been hesitant about granting camera permissions on mobile). If skipped,
      that's a deliberate choice, not a gap to chase.
-  6. Local dev note: `worker/` and the project root are separate directories with their own
+  5. Local dev note: `worker/` and the project root are separate directories with their own
      unrelated file listings — running `python3 -m http.server` from inside `worker/` by
      mistake (easy to do right after running deploy commands from there) serves the Worker's
      source files instead of the app; `cd` back to the repo root first.
@@ -446,12 +498,9 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   suspicion. No code or config change was needed.
 
 ## To-do
-- **Merge `future/ocr-offline-library` to `main`, when ready.** All three originally-parked
-  features are now implemented — Phase 2b (offline caching) and OCR camera-capture are verified
-  live; book scanning/library needs debashis9 to run `supabase/sql/books-table.sql` and do one
-  real-photo hands-on test first (see "Picking up next session" above). Once that's done,
-  nothing blocks a merge except an optional real-Android-phone OCR test debashis9 has been
-  hesitant about (permission comfort, not a technical gap).
+- **Book scanning/library still needs its live verification** — `supabase/sql/books-table.sql`
+  has to be run in the Supabase SQL editor, and one real-photo hands-on test done (see "Picking
+  up next session"). The code itself is merged and pushed; only the verification is outstanding.
 - **Worker rate limiting.** Flagged when the Worker had no auth check at all; matters less
   now that every request needs a real signed-in Supabase session (see M4 above), but still
   not there as defense-in-depth against a compromised or overly-eager signed-in account.
@@ -482,9 +531,8 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   app shell, never dictionary/API responses (the OCR Worker call included — deliberately live-
   network-only, same as the AI tab). This gap — opening the app fully offline used to fail
   outright, since the Supabase CDN script wasn't cached and saved words lived entirely in
-  Supabase with no local fallback — is addressed on the `future/ocr-offline-library` branch
-  (pinned+cached Supabase SDK, local mirror + capture queue) but not yet merged to `main`; see
-  Current state above.
+  Supabase with no local fallback — is closed (pinned+cached Supabase SDK, local mirror +
+  capture queue), live on `main`; see Current state above.
 - **Bump `sw.js`'s `CACHE` version constant whenever `index.html` (or `manifest.json`/icons)
   changes.** The service worker caches `./index.html` itself as part of the app shell — a
   real browser with an existing registration keeps serving whatever was cached under the old
@@ -525,11 +573,12 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   Phase 2 back when Phase 2 hadn't started.
 - **Phase 2 (cloud sync): DONE** — auth + storage both wired to Supabase (see Current state
   for details).
-- **Phase 2b: DONE, on `future/ocr-offline-library`, not yet merged to `main`** — offline
-  caching / local-first sync, using the IndexedDB code that had been kept around unused for
-  exactly this (see Current state above for details).
-- **OCR camera-capture: DONE and verified live on the same branch** (crop-before-send +
-  streaming word list, plus a follow-up bug-fix round) — see Current state above.
+- **Phase 2b: DONE and merged to `main`** — offline caching / local-first sync, using the
+  IndexedDB code that had been kept around unused for exactly this (see Current state above
+  for details).
+- **OCR camera-capture: DONE, verified live, and merged to `main`** (crop-before-send +
+  streaming word list, plus two follow-up bug-fix rounds — the second one mobile-usability,
+  2026-08-04) — see Current state above.
 
 ## Working style
 Explain changes in plain terms — I'm learning. Prefer small, reviewable steps over large
