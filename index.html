@@ -506,6 +506,37 @@
       pointer-events: none;
     }
 
+    /* ---- Library (book scanning) ---- */
+    .library-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
+    .book-list { display: flex; flex-direction: column; }
+    .book-entry {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 0; border-bottom: 1px solid var(--line);
+    }
+    .book-entry:last-child { border-bottom: none; }
+    .book-cover, .book-cover-placeholder {
+      flex: 0 0 auto; width: 40px; height: 56px; border-radius: 3px;
+      object-fit: cover; background: var(--paper-2);
+    }
+    .book-cover-placeholder {
+      display: flex; align-items: center; justify-content: center;
+      color: var(--oxblood); border: 1px solid var(--line);
+    }
+    /* Placeholder sits in the DOM from the start, hidden, rather than being
+       built as an HTML string inside an onerror handler -- the cover <img>'s
+       onerror just toggles visibility between the two instead. */
+    .book-cover.cover-failed { display: none; }
+    .book-cover-placeholder.cover-ok { display: none; }
+    .book-select { flex: 1; min-width: 0; text-align: left; background: transparent; border: none; padding: 0; }
+    .book-select:hover .book-title { color: var(--oxblood); }
+    .book-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 16px; }
+    .book-meta { color: var(--ink-soft); font-size: 13px; margin-top: 2px; }
+    .book-result-cover { width: 90px; height: 128px; object-fit: cover; border-radius: 4px; display: block; margin: 0 auto 14px; }
+    .book-result-title { text-align: center; font-size: 20px; }
+    .book-result-meta { text-align: center; }
+    .book-result-actions { margin-top: 16px; }
+    .manual-book-form { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+
     /* ---- Auth (Supabase magic link) ---- */
     .auth-section { margin-top: 40px; }
     .auth-card {
@@ -681,6 +712,7 @@
             <select id="book-filter" class="book-filter">
               <option value="">All books</option>
             </select>
+            <button id="library-open" type="button" class="btn-practice">Library</button>
             <button id="practice-open" type="button" class="btn-practice" hidden>Practice</button>
           </div>
         </div>
@@ -695,6 +727,12 @@
       <!-- Camera OCR: photograph or upload a page, tap a recognized word to look it up. -->
       <section id="camera-section" class="camera-section" hidden>
         <div id="camera-body"></div>
+      </section>
+
+      <!-- Book library: scan a cover/barcode to build a real book list, tap one
+           to fill the Reading field above. -->
+      <section id="library-section" class="library-section" hidden>
+        <div id="library-body"></div>
       </section>
     </div>
 
@@ -821,6 +859,14 @@
     // still has real detail to work with instead of inheriting the
     // whole-page cap.
     const CROP_SOURCE_MAX_DIMENSION = 2400;
+    const BOOK_LOOKUP_ENDPOINT = "https://margin-llm-proxy.debashis9.workers.dev/book-lookup";
+    // Long edge for a book-cover/barcode photo -- a single small text result,
+    // not a page of dense text, so this can stay smaller than OCR's own cap.
+    const BOOK_PHOTO_MAX_DIMENSION = 1200;
+    // Cover art needs no API call -- Open Library's cover endpoint is a bare,
+    // keyless image URL. "M" is their medium size; falls back to a placeholder
+    // via onerror when there's no isbn or no cover on file for it.
+    const bookCoverUrl = (isbn) => `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-M.jpg`;
 
     // Remember the current book between sessions (simple key/value, not the word list).
     const BOOK_KEY = "margin.book";
@@ -943,6 +989,41 @@
       const { error } = await sb.from("entries")
         .update({ mastered_at: mastered ? new Date().toISOString() : null })
         .eq("id", id);
+      if (error) throw error;
+    }
+
+    // Books scanned into the library — separate from entries.book (which
+    // stays plain text, unchanged) and its own small storage-module trio,
+    // same shape as saveEntry/getEntries/deleteEntry above.
+    function mapBookRow(row) {
+      return { id: row.id, isbn: row.isbn, title: row.title, author: row.author, addedAt: row.added_at };
+    }
+
+    // Re-scanning (or manually re-entering) a book already in the library
+    // updates that same row instead of duplicating it -- but only when there's
+    // an isbn to dedupe on; a manual entry with no isbn has nothing to match
+    // against, so it's always a plain insert (Postgres treats multiple NULLs
+    // as distinct for the unique(user_id, isbn) constraint, so this is safe).
+    async function saveBook({ isbn, title, author }) {
+      requireSession();
+      const row = { isbn: isbn || null, title, author: author || null };
+      const { data, error } = isbn
+        ? await sb.from("books").upsert(row, { onConflict: "user_id,isbn" }).select().single()
+        : await sb.from("books").insert(row).select().single();
+      if (error) throw error;
+      return mapBookRow(data);
+    }
+
+    async function getBooks() {
+      requireSession();
+      const { data, error } = await sb.from("books").select("*").order("added_at", { ascending: false });
+      if (error) throw error;
+      return (data || []).map(mapBookRow);
+    }
+
+    async function deleteBook(id) {
+      requireSession();
+      const { error } = await sb.from("books").delete().eq("id", id);
       if (error) throw error;
     }
 
@@ -2580,6 +2661,313 @@
       clearTimeout(autoSearchTimer);
       lookup(word);
     }
+
+    // ---------- book library ----------
+    // Deliberately a small, separate implementation rather than sharing code
+    // with the OCR camera flow above -- the only thing they truly have in
+    // common is "take or choose a photo, downscale it," and OCR's own version
+    // of that is entangled with its crop/streaming/pause-resume state, which
+    // has no equivalent here (a book lookup is one single-shot result, not a
+    // growing list to pause and return to). If a third capture flow ever
+    // shows up, that's the trigger to factor out a shared helper -- same
+    // reasoning that already keeps camera and practice separate.
+    let libraryStream = null; // the active getUserMedia stream, if any
+
+    function libraryToggleTargets() {
+      return [
+        document.querySelector(".book-row"),
+        document.querySelector(".lookup"),
+        out,
+        document.querySelector(".foot"),
+        document.querySelector(".saved-section"),
+      ];
+    }
+
+    function stopLibraryCamera() {
+      libraryStream?.getTracks().forEach((t) => t.stop());
+      libraryStream = null;
+    }
+
+    async function openLibrarySection() {
+      libraryToggleTargets().forEach((el) => (el.hidden = true));
+      $("library-section").hidden = false;
+      await renderLibraryList();
+    }
+
+    function closeLibrarySection() {
+      stopLibraryCamera();
+      $("library-section").hidden = true;
+      libraryToggleTargets().forEach((el) => (el.hidden = false));
+    }
+
+    async function renderLibraryList() {
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Library</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        <p class="status">Loading your library…</p>
+      `;
+      let books;
+      try {
+        books = await getBooks();
+      } catch (err) {
+        $("library-body").innerHTML = `
+          <div class="practice-head">
+            <h2 class="saved-title">Library</h2>
+            <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+          </div>
+          <p class="status error">Couldn't load your library: ${escapeHtml(err.message)}</p>
+        `;
+        return;
+      }
+
+      const rows = books.map((b) => `
+        <div class="book-entry">
+          <button type="button" class="book-select" data-id="${b.id}" data-title="${escapeHtml(b.title)}">
+            ${ b.isbn
+              ? `<img class="book-cover" src="${bookCoverUrl(b.isbn)}" alt="" loading="lazy"
+                   onerror="this.classList.add('cover-failed'); this.nextElementSibling.classList.remove('cover-ok');" />
+                 <span class="book-cover-placeholder cover-ok">📖</span>`
+              : `<span class="book-cover-placeholder">📖</span>` }
+            <span class="saved-word-line">
+              <span class="book-title">${escapeHtml(b.title)}</span>
+              <span class="book-meta">${escapeHtml(b.author || "Unknown author")} · ${formatDate(b.addedAt)}</span>
+            </span>
+          </button>
+          <button class="saved-delete" type="button" data-book-id="${b.id}">Delete</button>
+        </div>
+      `).join("");
+
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Library</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        <div class="book-list">
+          ${ books.length ? rows : `<p class="saved-empty">No books yet — scan a cover to start.</p>` }
+        </div>
+        <div class="practice-mode-buttons">
+          <button id="library-add" type="button">Add a book</button>
+        </div>
+      `;
+    }
+
+    // ---- add-a-book: take a photo, or upload one ----
+    function renderLibraryChooser() {
+      stopLibraryCamera();
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a book</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        <p class="practice-lede">Point your camera at the back cover or barcode, or upload a photo.</p>
+        <div class="practice-mode-buttons">
+          <button id="library-take-photo" type="button">Take a photo</button>
+          <button id="library-choose-photo" type="button">Choose a photo</button>
+        </div>
+        <div class="practice-mode-buttons">
+          <button id="library-enter-manually" type="button" class="btn-practice-nav">Enter it manually instead</button>
+        </div>
+        <input id="library-file-input" type="file" accept="image/*" hidden />
+      `;
+      $("library-file-input").addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const img = new Image();
+        img.onload = () => { processBookPhoto(img); img.remove(); };
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    async function openLibraryLivePreview() {
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a book</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        <video id="library-preview" class="camera-preview" autoplay playsinline muted></video>
+        <div class="practice-mode-buttons">
+          <button id="library-capture" type="button">Capture</button>
+          <button id="library-cancel" type="button" class="btn-practice-nav">Cancel</button>
+        </div>
+      `;
+      try {
+        libraryStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        $("library-preview").srcObject = libraryStream;
+      } catch (err) {
+        renderLibraryError(
+          err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
+            ? "Camera access was denied. Check your browser's site settings and try again."
+            : "Couldn't start the camera. Try again, or choose a photo instead."
+        );
+      }
+    }
+
+    function captureBookFromVideo() {
+      processBookPhoto($("library-preview"));
+    }
+
+    function renderLibraryLoading() {
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a book</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        <p class="status">Reading the cover…</p>
+      `;
+    }
+
+    function renderLibraryError(message) {
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Scan a book</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        <p class="status error">${escapeHtml(message)}</p>
+        <div class="practice-mode-buttons">
+          <button id="library-retry" type="button">Try again</button>
+        </div>
+        <div class="practice-mode-buttons">
+          <button id="library-enter-manually" type="button" class="btn-practice-nav">Enter it manually instead</button>
+        </div>
+      `;
+    }
+
+    async function processBookPhoto(source) {
+      stopLibraryCamera();
+
+      const naturalWidth = source.videoWidth || source.naturalWidth || source.width;
+      const naturalHeight = source.videoHeight || source.naturalHeight || source.height;
+      const scale = Math.min(1, BOOK_PHOTO_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
+      const width = Math.round(naturalWidth * scale);
+      const height = Math.round(naturalHeight * scale);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(source, 0, 0, width, height);
+      const base64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+
+      renderLibraryLoading();
+
+      try {
+        const res = await fetch(BOOK_LOOKUP_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + currentSession.access_token,
+          },
+          body: JSON.stringify({ image: base64 }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Lookup failed (HTTP " + res.status + ")");
+        }
+        const result = await res.json();
+        if (!result.title) {
+          renderLibraryError("Couldn't find a book in that photo. Try again with the barcode or title clearly visible, or enter it manually.");
+          return;
+        }
+        renderBookResult(result);
+      } catch (err) {
+        const message = navigator.onLine
+          ? "Couldn't read that. Try again, or enter it manually."
+          : "You're offline — scanning a book needs an internet connection. Try again once you're back online.";
+        renderLibraryError(message);
+      }
+    }
+
+    function renderBookResult(result) {
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Is this right?</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        ${ result.isbn
+          ? `<img class="book-result-cover" src="${bookCoverUrl(result.isbn)}" alt=""
+               onerror="this.style.display='none';" />`
+          : "" }
+        <p class="book-title book-result-title">${escapeHtml(result.title)}</p>
+        ${ result.author ? `<p class="book-meta book-result-meta">${escapeHtml(result.author)}</p>` : "" }
+        <div class="practice-mode-buttons book-result-actions">
+          <button id="library-confirm-add" type="button"
+            data-isbn="${escapeHtml(result.isbn || "")}" data-title="${escapeHtml(result.title)}" data-author="${escapeHtml(result.author || "")}">
+            Add to library
+          </button>
+          <button id="library-retry" type="button" class="btn-practice-nav">Try again</button>
+        </div>
+      `;
+    }
+
+    function renderManualBookForm() {
+      $("library-body").innerHTML = `
+        <div class="practice-head">
+          <h2 class="saved-title">Add a book</h2>
+          <button id="library-close" type="button" class="btn-practice-close" aria-label="Close library">×</button>
+        </div>
+        <form id="manual-book-form" class="manual-book-form">
+          <input id="manual-book-title" type="text" placeholder="Title" required autocomplete="off" />
+          <input id="manual-book-author" type="text" placeholder="Author (optional)" autocomplete="off" />
+          <div class="practice-mode-buttons">
+            <button type="submit">Add to library</button>
+          </div>
+        </form>
+      `;
+      $("manual-book-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const title = $("manual-book-title").value.trim();
+        if (!title) return;
+        const author = $("manual-book-author").value.trim();
+        await addBookToLibrary({ isbn: null, title, author });
+      });
+    }
+
+    async function addBookToLibrary({ isbn, title, author }) {
+      try {
+        await saveBook({ isbn: isbn || null, title, author: author || null });
+        await renderLibraryList();
+      } catch (err) {
+        renderLibraryError("Couldn't save that book: " + err.message);
+      }
+    }
+
+    function selectLibraryBook(title) {
+      $("word").focus();
+      $("book").value = title;
+      $("book").dispatchEvent(new Event("input"));
+      closeLibrarySection();
+    }
+
+    async function deleteLibraryBookRow(id) {
+      try {
+        await deleteBook(id);
+        await renderLibraryList();
+      } catch (err) {
+        renderLibraryError("Couldn't delete that book: " + err.message);
+      }
+    }
+
+    $("library-open").addEventListener("click", openLibrarySection);
+    $("library-section").addEventListener("click", (e) => {
+      if (e.target.id === "library-close") { closeLibrarySection(); return; }
+      if (e.target.id === "library-add") { renderLibraryChooser(); return; }
+      if (e.target.id === "library-take-photo") { openLibraryLivePreview(); return; }
+      if (e.target.id === "library-choose-photo") { $("library-file-input").click(); return; }
+      if (e.target.id === "library-capture") { captureBookFromVideo(); return; }
+      if (e.target.id === "library-cancel") { renderLibraryChooser(); return; }
+      if (e.target.id === "library-retry") { renderLibraryChooser(); return; }
+      if (e.target.id === "library-enter-manually") { renderManualBookForm(); return; }
+      if (e.target.id === "library-confirm-add") {
+        const btn = e.target;
+        addBookToLibrary({ isbn: btn.dataset.isbn, title: btn.dataset.title, author: btn.dataset.author });
+        return;
+      }
+      const selectBtn = e.target.closest(".book-select");
+      if (selectBtn) { selectLibraryBook(selectBtn.dataset.title); return; }
+      const deleteBtn = e.target.closest(".saved-delete[data-book-id]");
+      if (deleteBtn) { deleteLibraryBookRow(deleteBtn.dataset.bookId); return; }
+    });
 
     // ---------- clear button ----------
     // Shows only once there's text to clear; voice input also triggers it (see above).
