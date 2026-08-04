@@ -372,9 +372,8 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   small result, not a growing word list, so there's no reason for SSE here.
   **Purely additive, no migration risk:** `entries.book` is untouched — still plain text, still
   the same exact-match filter (`populateBookFilter`). A new `books` table
-  (`supabase/sql/books-table.sql` — **debashis9 needs to run this in the Supabase SQL editor
-  before the feature works**, same as every other `supabase/sql/*.sql` file in this repo; not
-  something I can run myself) is a convenience layer on top: RLS scoped to
+  (`supabase/sql/books-table.sql` — **run in the Supabase SQL editor on 2026-08-04**, same as
+  every other `supabase/sql/*.sql` file in this repo; not something I can run myself) is a convenience layer on top: RLS scoped to
   `auth.uid() = user_id` (the same per-row-ownership shape `entries` already uses, not
   `allowed_emails`' hardcoded-admin shape, which is the wrong model for a personal list),
   `unique(user_id, isbn)` so re-scanning a book upserts instead of duplicating (manual entries
@@ -399,9 +398,10 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   Supabase REST calls (empty state, scan through to confirm, appears with cover, tap-to-select
   fills "Reading", delete, manual-entry fallback, and the cover-image-404 placeholder fallback)
   — zero console errors, and a full regression pass confirmed the existing
-  saved-list/book-filter/lookup flow is untouched. **Not yet verified: a real hands-on test with
-  an actual physical book**, and the `books-table.sql` migration hasn't been run yet — both need
-  debashis9, same as OCR's own path to verification.
+  saved-list/book-filter/lookup flow is untouched. **Confirmed live 2026-08-04:** the migration
+  has been run and debashis9 sees the Library screen listing books correctly against the real
+  table. **Still not confirmed: scanning an actual physical book's cover** — the one step that
+  needs a real photo, same as OCR's own path to verification.
 
 - **A mobile-usability round, 2026-08-04, from debashis9's first real phone test of the merged
   app** (everything above is now on `main` and pushed — the `future/ocr-offline-library` branch
@@ -462,9 +462,8 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   the Reading row's wrapped layout with the library dropdown, and whether the new underline/
   translucent-wash word marking is actually readable on a real photographed page — the marker
   colours were picked against synthetic test images, so real paper is the honest test.
-  1. **Still open: run `supabase/sql/books-table.sql` in the Supabase SQL editor.** Nothing about
-     the Library screen will actually persist until this table exists — I can't run it myself,
-     same as every other file in `supabase/sql/`.
+  1. **Done 2026-08-04:** `supabase/sql/books-table.sql` has been run, and the Library screen
+     is confirmed rendering correctly against the real table.
   2. **Still open: a real hands-on test with an actual book**: open the app, tap Library → Add a
      book, take a real photo of a book's back cover or barcode, and confirm the ISBN/title/author
      come back right and the cover art loads. This is the one piece only debashis9 can do —
@@ -498,9 +497,9 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   suspicion. No code or config change was needed.
 
 ## To-do
-- **Book scanning/library still needs its live verification** — `supabase/sql/books-table.sql`
-  has to be run in the Supabase SQL editor, and one real-photo hands-on test done (see "Picking
-  up next session"). The code itself is merged and pushed; only the verification is outstanding.
+- **Book scanning: one real-photo test left.** The `books-table.sql` migration is run and the
+  Library screen is confirmed working live (2026-08-04); what's untested is photographing an
+  actual book cover/barcode and checking the ISBN/title/author/cover art come back right.
 - **Worker rate limiting.** Flagged when the Worker had no auth check at all; matters less
   now that every request needs a real signed-in Supabase session (see M4 above), but still
   not there as defense-in-depth against a compromised or overly-eager signed-in account.
