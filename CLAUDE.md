@@ -454,10 +454,61 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
     staying marked. **Confirmed on a real phone by debashis9, 2026-08-04** — the fixes hold up
     in use; the word marking is readable against real paper.
 
+- **A declutter round, 2026-08-04 (branch `design/declutter-ui`, merged to `main`)**, prompted by
+  "the UI is too crowded". The signed-in page put five controls and four blocks of standing text
+  between opening the app and typing a word; the word field started ~460px down a 844px phone
+  screen. What moved:
+  - **Masthead:** Sign out joined the theme toggle in the corner (it lives outside `#app-content`
+    now, so `showSignedIn`/`showSignedOut` toggle it explicitly); the account strip and the
+    signed-in email are gone. Shorter tagline, and a dog-eared page-corner glyph beside the
+    wordmark — the "corner-fold" option floated back on 2026-08-04 when the earlier squiggle mark
+    was cut. Chosen from five candidates rendered side by side; an outline-only page icon read as
+    a generic "document" until the fold triangle got a filled `--paper-2` page behind it.
+  - **Capture order:** the lookup bar is first on the page; "Reading" follows it as one bookplate
+    line. The "Sentence" field moved *into* the result card as a collapsed "+ Add the line from
+    your book" link — you only have a line to quote once you have a word. It sits outside
+    `#tab-body` so a Dictionary/AI switch doesn't wipe it, and `sentenceDraft`/`sentenceOpen`
+    mirror it so a full `renderCard()` doesn't either. All four save paths read it through
+    `contextSentenceValue()`/`clearContextSentence()` (null-safe — the input only exists while a
+    card is on screen).
+  - **Saved list folded away** behind the "Saved words" heading, with a count; open/closed
+    remembered in `localStorage` (`margin.savedOpen`), default closed. The book filter lives
+    inside the opened panel. "Learned it"/"Delete" moved into the opened word's detail instead of
+    repeating on every row — they were the densest thing on the page and squeezed the book·date
+    line into wrapping.
+  - **The Library button beside "Saved words" is gone.** "Add a book…" is now the second option
+    in the Reading row's library dropdown (which is therefore never hidden any more, or a new
+    account with no books could never reach the Library screen). Practice is untouched.
+  - **One filled accent per screen:** `.btn-practice` and `.btn-save-sense` are neutral until
+    hover/focus. A multi-sense word used to stack three outlined-oxblood "Save this meaning"
+    pills down one card. The standing footnote moved to the sign-in card (`.auth-note`), where
+    it's actually news.
+  - **Two real Library bugs fixed on the way, both live since the feature shipped:** `.book-select`
+    is a `<button>`, so it inherited the global `button { color: var(--on-oxblood) }` and painted
+    book titles near-white on the near-white page — **invisible in light mode** (dark mode hid the
+    bug, since `--on-oxblood` stays light); and it wasn't `display:flex`, so the cover thumbnail
+    broke onto its own line above the title. Found by probing the rendered DOM, not by reading the
+    CSS — the screenshot just looked like the title was missing.
+  - Practice/Scan/Library used to open under an empty bordered band (their own `border-top` +
+    margin framed nothing once everything above them was hidden). Fixed with a sibling selector,
+    `.lookup[hidden] ~ .practice-section` etc., rather than more open/close bookkeeping in JS.
+  - Verified headless at 390×844 against the real `index.html` (Supabase stubbed): 32 checks
+    covering toggle persistence across a reload, row actions only inside the opened detail, the
+    sentence surviving a tab switch and reaching the insert payload, both dropdown routes, every
+    open/close pair, the two Library bugs, and no horizontal overflow. Note for future harnesses:
+    the context needs `serviceWorkers: "block"`, or on the second load `sw.js` serves its cached
+    copy of the Supabase SDK and the route-based stub silently stops applying.
+
 ## Picking up next session
 - **Everything is merged to `main` and pushed.** The three parked features (offline mode, OCR,
   book library) all landed on `main`; `future/ocr-offline-library` is now a leftover branch, not
   where work happens.
+- **The 2026-08-04 declutter round is on `main` but has NOT been looked at on a real phone yet**
+  — it was reviewed on `localhost:8000` only. Three things debashis9 may still want changed (all
+  small): whether "Add a book…" belongs in the Reading dropdown or in the "All books" filter
+  beside Saved words (the instruction said "under library drop down", which fits either); the
+  dog-ear mark, where the alternative was folding the masthead's own bottom rule at its right end
+  instead of a glyph; and the tagline wording ("Catch a word mid-page.").
 - **The 2026-08-04 mobile-usability round is verified on a real phone** (sticky crop buttons,
   the wrapped Reading row + library dropdown, the underline/translucent-wash word marking, the
   streaming progress line) — see the entry at the end of Current state. Nothing outstanding
@@ -465,7 +516,7 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   1. **Done 2026-08-04:** `supabase/sql/books-table.sql` is run, a real book was scanned in
      successfully, and the Library screen renders correctly against the real table — book
      scanning/library is fully verified, nothing left to check there.
-  2. `sw.js` is at `v38`. The Worker (`worker/src/index.js`) is deployed live and matches what's
+  2. `sw.js` is at `v39`. The Worker (`worker/src/index.js`) is deployed live and matches what's
      committed — no pending redeploy.
   3. Decide whether to test OCR on a real Android phone (optional — "Choose a photo" with a
      phone-taken picture has already fully exercised OCR recognition/crop/streaming; only the
