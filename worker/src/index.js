@@ -59,14 +59,22 @@ export default {
     // couldn't already reach.
     const requestOrigin = request.headers.get("Origin") || "";
     const isLocalhost = /^https?:\/\/localhost(:\d+)?$/.test(requestOrigin);
-    const allowedOrigin = isLocalhost ? requestOrigin : (env.ALLOWED_ORIGIN || "*");
+    // Security review finding: this used to fall back to "*" (allow any
+    // origin) if ALLOWED_ORIGIN were ever unset on the deployed Worker --
+    // "fail open" on a config gap. Not exploitable today (ALLOWED_ORIGIN is
+    // set, and the real access boundary is verifySupabaseAuth below, not
+    // CORS -- a browser-only restriction on reading responses, not on
+    // making the request), but a missing var should fail closed, not
+    // silently widen to every origin. Omitting the header entirely makes
+    // the browser block cross-origin reads instead.
+    const allowedOrigin = isLocalhost ? requestOrigin : env.ALLOWED_ORIGIN;
 
     const corsHeaders = {
-      "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       // Authorization added so the browser's CORS preflight actually allows
       // the bearer-token header the auth check below requires.
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      ...(allowedOrigin ? { "Access-Control-Allow-Origin": allowedOrigin } : {}),
     };
 
     if (request.method === "OPTIONS") {
@@ -101,7 +109,6 @@ export default {
     // and it's exactly what turned "wrong URL" into a confusing Anthropic
     // SDK credential error instead of an obvious "not found."
     const url = new URL(request.url);
-    let definition;
     try {
       if (url.pathname === "/define-gemma" || url.pathname === "/define") {
         const word = (body.word || "").trim();
@@ -109,18 +116,20 @@ export default {
         const book = (body.book || "").trim();
         const userMessage = book ? `Word: "${word}"\nBook: "${book}"` : `Word: "${word}"`;
 
-        if (url.pathname === "/define-gemma") {
-          definition = await lookupGemma(word, book, userMessage, env, body.model);
-        } else {
-          definition = await lookupClaude(userMessage, env);
-        }
+        const definition = url.pathname === "/define-gemma"
+          ? await lookupGemma(word, book, userMessage, env, body.model)
+          : await lookupClaude(userMessage, env);
+        return json(definition, 200, corsHeaders);
       } else if (url.pathname === "/ocr") {
         if (!body.image) return json({ error: "Missing 'image'" }, 400, corsHeaders);
-        definition = await lookupOcr(body.image, env);
+        // Streaming, not a plain awaited value -- this returns its own
+        // Response directly (a ReadableStream of SSE word events) instead
+        // of going through json() below, since the client needs to start
+        // rendering tappable words before the whole page finishes OCR-ing.
+        return streamOcr(body.image, env, corsHeaders);
       } else {
         return json({ error: "Not found. Use /define-gemma, /define, or /ocr." }, 404, corsHeaders);
       }
-      return json(definition, 200, corsHeaders);
     } catch (err) {
       return json({ error: "Lookup failed", detail: String(err) }, 502, corsHeaders);
     }
@@ -281,85 +290,165 @@ headword -- but keep the box tight around the word exactly as it appears on the 
 included. Skip page numbers and running headers. Output ONLY this JSON, no markdown fences, no \
 other text: {"words": [{"text": string, "box": [number, number, number, number]}]}`;
 
-// Plain (non-streaming) generateContent, unlike lookupGemma's
-// streamGenerateContent -- the client needs the complete word+box list
-// before it can render anything useful, so there's no benefit to the
-// streaming/SSE complexity here, and it sidesteps that function's own
-// \r\n-frame-parsing bug class entirely.
-async function lookupOcr(imageBase64, env) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${OCR_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": env.GEMINI_API_KEY,
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: OCR_PROMPT },
-            { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
-          ],
-        }],
-        // A page's worth of {"text":...,"box":[...]} entries adds up fast --
-        // a real, dense book page (250-300+ words) needs real headroom, not
-        // just the definition path's 300. 4096 turned out too tight in live
-        // testing (truncated mid-thinking, before any real answer) -- bumped
-        // to 12000, well under the model's own 32768 outputTokenLimit.
-        // thinkingLevel: "minimal" is not optional here -- verified live
-        // that this exact call takes 60s+ (times out) without it and ~9s
-        // with it, same tuning lookupGemma already needed for plain text.
-        generationConfig: {
-          maxOutputTokens: 12000,
-          thinkingConfig: { thinkingLevel: "minimal" },
-        },
-      }),
-    }
-  );
+// Matches one COMPLETE {"text": "...", "box": [n,n,n,n]} entry as it
+// appears in the model's still-accumulating raw text. A match requires the
+// closing "}" to have already arrived, so the word currently being
+// generated is simply not matched yet -- this is what lets words stream out
+// one at a time instead of waiting for the whole response. It also makes
+// streaming naturally resilient to the "unescaped quote inside text" model
+// slip that the old non-streaming path needed a whole-response-retry for:
+// a corrupted entry just never forms a complete match and is silently
+// skipped, instead of invalidating everything after it.
+const WORD_ENTRY_RE = /\{\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"box"\s*:\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]\s*\}/g;
 
-  if (!res.ok) {
-    throw new Error(`Gemini API HTTP ${res.status}: ${await res.text()}`);
-  }
+// Re-scans the full accumulated text each time (cheap -- a whole page's
+// worth is a few thousand characters) and returns only the entries beyond
+// `alreadyEmitted`, since earlier matches stay identical as more text is
+// appended.
+function extractNewWords(acc, alreadyEmitted) {
+  const matches = [...acc.matchAll(WORD_ENTRY_RE)];
+  const words = matches.slice(alreadyEmitted).map((m) => {
+    let text;
+    try { text = JSON.parse(`"${m[1]}"`); } catch { return null; }
+    return { text, box: [Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])] };
+  }).filter(Boolean);
+  return { words, total: matches.length };
+}
 
-  const data = await res.json();
-  // "thought" parts (the model's internal reasoning) are still present even
-  // at thinkingLevel: "minimal" and typically come before the real answer --
-  // lookupGemma's own streaming parser already has to skip these; this
-  // function was missing that filter entirely, so it was reading the
-  // thinking text (or nothing, if the response got cut off mid-thought)
-  // instead of the actual word list.
-  const parts = data.candidates?.[0]?.content?.parts || [];
-  const text = parts.find((p) => !p.thought && p.text)?.text;
-  if (!text) {
-    const finishReason = data.candidates?.[0]?.finishReason;
-    throw new Error(`No answer text in Gemini OCR response (finishReason: ${finishReason})`);
-  }
+// Same defensive cleanup the old non-streaming path ran once over the
+// whole list, applied per-word instead: drop anything without real text or
+// a well-formed 4-number box, and strip stray leading/trailing punctuation
+// (e.g. a trailing comma breaks an exact-match dictionary lookup even
+// though the AI tab tolerates it fine) regardless of whether the model
+// actually followed that part of the prompt.
+function cleanOcrWord(w) {
+  if (!w || typeof w.text !== "string") return null;
+  if (!Array.isArray(w.box) || w.box.length !== 4 || !w.box.every((n) => typeof n === "number" && !Number.isNaN(n))) return null;
+  const text = w.text.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+  if (!text) return null;
+  return { text, box: w.box };
+}
 
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  const parsed = JSON.parse(cleaned);
+// Streams the OCR word list back to the client as newline-delimited SSE
+// events, one word at a time, instead of making the client wait through the
+// entire generation (a full dense page can take 60-90s+) for one big JSON
+// blob. Reuses lookupGemma's streamGenerateContent + \r\n-frame-parsing
+// pattern for reading Gemini's own SSE stream; layered on top of that is
+// the word-at-a-time extraction above, since Gemini's chunk boundaries
+// don't line up with word-entry boundaries in the JSON it's generating.
+// Does NOT lower maxOutputTokens or change the model -- this is purely a
+// delivery-timing change, not an accuracy/quality one.
+function streamOcr(imageBase64, env, corsHeaders) {
+  const encoder = new TextEncoder();
+  const startedAt = Date.now();
 
-  // Defensive pass -- the prompt's instructions are a request, not a
-  // guarantee: drop anything without real text or a well-formed 4-number
-  // box, and strip stray leading/trailing punctuation from the text itself
-  // (e.g. a trailing comma breaks an exact-match dictionary lookup even
-  // though the AI tab tolerates it fine) regardless of whether the model
-  // actually followed that part of the prompt.
-  const words = (parsed.words || [])
-    .map((w) => (w && typeof w.text === "string")
-      ? { ...w, text: w.text.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "") }
-      : w)
-    .filter((w) =>
-      w && typeof w.text === "string" && w.text &&
-      Array.isArray(w.box) && w.box.length === 4 && w.box.every((n) => typeof n === "number")
-    );
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${OCR_MODEL}:streamGenerateContent?alt=sse`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": env.GEMINI_API_KEY,
+            },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: OCR_PROMPT },
+                  { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+                ],
+              }],
+              generationConfig: {
+                maxOutputTokens: 12000,
+                thinkingConfig: { thinkingLevel: "minimal" },
+              },
+            }),
+          }
+        );
 
-  return { words };
+        if (!res.ok) {
+          send({ error: `Gemini API HTTP ${res.status}: ${await res.text()}` });
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let acc = "";
+        let emitted = 0;
+        let firstWordAt = null;
+        let sawAnyText = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+
+          let sep;
+          while ((sep = buffer.indexOf("\n\n")) !== -1) {
+            const frame = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+            if (!dataLine) continue;
+            const jsonStr = dataLine.slice(5).trim();
+            if (!jsonStr) continue;
+
+            const chunk = JSON.parse(jsonStr);
+            const part = chunk.candidates?.[0]?.content?.parts?.[0];
+            if (part && !part.thought && part.text) {
+              sawAnyText = true;
+              acc += part.text;
+              const cleanedAcc = acc.replace(/^```(?:json)?\s*/i, "");
+              const { words, total } = extractNewWords(cleanedAcc, emitted);
+              emitted = total;
+              for (const raw of words) {
+                const word = cleanOcrWord(raw);
+                if (word) {
+                  if (firstWordAt === null) firstWordAt = Date.now();
+                  send({ word });
+                }
+              }
+            }
+          }
+        }
+
+        if (!sawAnyText) {
+          send({ error: "No answer text in Gemini OCR response" });
+          return;
+        }
+
+        const totalMs = Date.now() - startedAt;
+        send({
+          done: true,
+          _timing: { first_word_ms: firstWordAt !== null ? firstWordAt - startedAt : totalMs, total_ms: totalMs },
+        });
+      } catch (err) {
+        send({ error: String(err) });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+      ...corsHeaders,
+    },
+  });
 }
 
 function json(data, status, headers) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...headers },
+    // nosniff on every response -- cheap, zero behavioral risk, and stops a
+    // browser from ever trying to interpret a JSON body as anything else.
+    headers: { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", ...headers },
   });
 }

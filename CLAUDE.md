@@ -230,8 +230,9 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   browser/OS combination even though the live read had genuinely failed — fixed by falling back
   on any live-read failure, unconditionally, rather than trusting that flag.
 
-- **OCR camera-capture, on the same branch, in progress as of 2026-08-02 — implemented but not
-  yet fully verified live.** Point a camera at (or upload a photo of) a page; a new Worker
+- **OCR camera-capture, on the `future/ocr-offline-library` branch — DONE and verified live as
+  of 2026-08-04** (see the dated entries further below for the full path from first prototype to
+  verified). Point a camera at (or upload a photo of) a page; a new Worker
   endpoint (`/ocr`, same `verifySupabaseAuth`/CORS pattern as `/define-gemma`) sends the image
   to Gemma 4 26B — the same model as the AI tab (confirmed via a real test call that it
   genuinely accepts image input, description matched the actual test image) — and asks for a
@@ -261,33 +262,118 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   exact-match lookup even though the AI tab tolerated it fine — the OCR prompt now asks for
   punctuation-stripped text, and the Worker strips it defensively too regardless of whether the
   model complies.
-  **Known, accepted risk, not resolved:** a real full page took ~1.7 minutes end-to-end
-  (confirmed via the Network tab's Timing panel) before succeeding — uncomfortably close to
-  what's likely a Cloudflare request timeout, though the exact ceiling isn't confirmed.
-  Mitigated only by UI guidance (a bolded callout, not a muted hint, urging a paragraph or a few
-  lines instead of a whole page) — deliberately not solved with a real crop-before-send step or
-  automatic tiling; that's a bigger feature addition to consider only if the hint proves
-  insufficient in practice.
-  **Not yet done, picking up from here:** the Worker has NOT been redeployed since the
-  punctuation fix (the one successful deploy/test cycle was for the thought-filter + token-limit
-  fix only) — `npm run deploy` from `worker/` still needed. Tested successfully on desktop
-  Chrome via `localhost:8000` (DevTools, real book photo) but not yet on a real Android phone,
-  which was the planned next step before pausing — see the USB port-forwarding steps discussed
-  live (not written down here) if picking this back up: enable USB debugging, `chrome://inspect`
-  → port forwarding `8000 → localhost:8000`, visit `http://localhost:8000/` on the phone's
-  Chrome so it's treated as a secure context for camera access.
+  **Real-device test, 2026-08-02/03: the "blocky rectangle" report was a false alarm, not a
+  bug.** debashis9 photographed a real page ("Drink of the Gods", p.139) with an Android phone
+  and uploaded it via desktop Chrome's "Choose a photo" (USB live-camera debugging was attempted
+  first but abandoned over permission concerns — see below); the overlay appeared to be one
+  dark rectangle instead of one box per word. Checking the actual `/ocr` response showed Gemini
+  had correctly returned ~135 individual, correctly-ordered, correctly-boxed words spanning the
+  whole visible paragraph — the "one box" was just whichever `.ocr-word-choice` button currently
+  had `:hover`/`:focus-visible` (the only state at which these deliberately-transparent buttons
+  show any color at all), not a rendering or model bug. Confirms the core OCR recognition
+  genuinely works on a real, imperfect, handheld photo (angle, blur, page curl included).
+  **One real bug found and fixed in the same pass, 2026-08-03:** re-submitting that same photo
+  twice afterward both failed with `SyntaxError: Expected ',' or ']' after array element` — this
+  page's dialogue is quote-heavy (`"I will take you around after lunch," said Brahaspati...`),
+  and Gemini doesn't always comply with the prompt's instruction to strip quote marks out of a
+  word's `text` field first, so an unescaped `"` sometimes lands inside a JSON string and breaks
+  parsing. Live-tested as genuinely transient sampling variance (same photo, same code, worked
+  on the very next call) — this is what motivated the streaming rework below, which sidesteps
+  the failure mode entirely rather than papering over it with a retry.
+  **Cloudflare Worker timeout ceiling, confirmed 2026-08-03 (corrects the entry above):** per
+  Cloudflare's own docs, an HTTP-triggered Worker has **no fixed wall-clock duration limit** as
+  long as the client stays connected — the actual cap is *CPU time* (30s default on Paid, up to
+  5 min configurable), and time spent awaiting `fetch()` (e.g. the whole Gemini call) does not
+  count against it at all. So a slow OCR call was never at real risk of Cloudflare cutting it
+  off; the real cost of a 60-90s wait was purely UX (and a smaller risk of a mobile
+  network/carrier dropping an idle-looking long connection), not an imminent timeout.
+  **Crop-before-send + streaming word list, done 2026-08-03 — the fix for both the latency and
+  the "waits a minute then dumps everything at once" UX.** Two changes, made together:
+  (1) A new crop-selection screen (`renderCropChooser`/`wireCropSelection` in `index.html`) sits
+  between capture and send: drag over a paragraph or a few lines (percent-of-viewport
+  coordinates, same idiom the word-overlay itself already used), then "Scan selected area" or
+  "Scan whole photo". Crucially, the crop is taken from the *original* working canvas
+  (`CROP_SOURCE_MAX_DIMENSION = 2400`) rather than a copy already downscaled for the old
+  whole-page flow — `OCR_MAX_DIMENSION` (1600) now caps only the final, already-cropped region,
+  so a small selection keeps far more real detail per word than before, not less. Fewer output
+  tokens needed for a small region is also the main latency lever, directly addressing the
+  ~60-90s full-page wait.
+  (2) The Worker's `/ocr` no longer waits for one full response then does a single
+  `JSON.parse()` — it uses `streamGenerateContent` (same pattern as `lookupGemma`) and
+  incrementally regex-extracts each complete `{"text":..., "box":[...]}` entry from the
+  accumulating text as Gemini generates it, forwarding each as its own SSE event the moment it's
+  complete. The client (`streamOcrWords`/`appendOcrWordButton`) reads this and appends each
+  word's tappable button to the photo as it arrives, instead of waiting for the whole list.
+  This also happens to make the quote-escaping bug above moot rather than patched: a corrupted
+  entry simply never forms a complete regex match and is silently skipped, instead of a single
+  bad character invalidating the entire response the way whole-response `JSON.parse` did — so
+  the retry-once wrapper built for that bug was removed as superseded, not kept alongside.
+  Neither `maxOutputTokens` nor the model changed — this is a delivery-timing change, not an
+  accuracy one.
+  **Verification performed 2026-08-03 (honest about scope — no real phone/photo access from
+  here):** the Worker's actual Gemini-facing streaming+regex logic was run for real (via the
+  local `.dev.vars` Gemini key, bypassing only the Worker's HTTP/auth layer, which is unrelated
+  to this change) against a small cropped test region and correctly recognized 5 words in ~5.8s
+  total (~4s to the first word) — confirms the mechanism itself works end-to-end. The
+  whole-page version of that same synthetic test image produced a bad, repetitive result (93s,
+  only 7 words) — a pre-existing quirk of that particular synthetic test asset, not a regression
+  from this change, and not a reliable stand-in for the real "before" baseline, which remains
+  debashis9's own earlier live test (~90s-1.7min for a full real photo, all ~135 words correct).
+  The client-side crop-drag → confirm → incremental-word-rendering flow was verified end-to-end
+  in a headless browser against the real `index.html` code (mocked only the `/ocr` network
+  response, since a real call needs a live Supabase session not available here) — box math and
+  percent positioning confirmed correct.
+  **The real hands-on test happened 2026-08-04 and passed — "Everything checks out. Looks
+  clean," confirmed live by debashis9** (desktop + "Choose a photo", not yet a real Android
+  phone — see below). Testing on a real Android phone is still open — USB live-camera debugging
+  was attempted the prior session but paused over permission-comfort concerns, not a technical
+  blocker; "Choose a photo" with a phone-taken picture remains a fully valid way to test OCR
+  recognition/accuracy/crop/streaming without it, and is a reasonable default going forward
+  unless the live-camera-specific UX (getUserMedia permission prompt, viewfinder) is
+  specifically what needs testing.
+  **A round of real bugs found via that hands-on test, all fixed same day (2026-08-04):**
+  (1) The crop-selection drag had no stopping rule — starting a drag on the photo triggered the
+  browser's own native "drag this image" gesture, which hijacked the pointer sequence so
+  `pointerup` never fired, leaving the selection box tracking the cursor indefinitely with no
+  way to stop it. Fixed with `-webkit-user-drag: none`/`user-select: none` on the crop image,
+  `draggable="false"`, `e.preventDefault()` on pointerdown, and a `pointercancel` safety net —
+  verified with a real-mouse-event test that reproduced the exact symptom before the fix and
+  confirmed a clean stop after.
+  (2) Tapping a word early in a long stream (e.g. "time", a handful of words into a ~135-word
+  page) abandoned the rest of the stream with no way back to the photo, and — separately — a
+  dictionary lookup for that same word then failed ("Couldn't reach the dictionary"), most
+  likely from the still-running background stream competing for the browser's
+  network/CPU right as the dictionary fetch went out (not fully reproduced in isolation, so
+  flag it again if it recurs). Fixed by a real redesign, not a patch: tapping a word now
+  *pauses* the scan (`pauseCameraSection()`) instead of closing it — the same photo and
+  whatever words had streamed in are still there if the scan button (now showing a small dot)
+  is tapped again, verified to resume without re-fetching. Only a genuine close (×) actually
+  cancels the in-flight stream, via a real `AbortController` wired through `streamOcrWords()`,
+  so background token/time is no longer spent on words nobody will see once someone's done.
+  **Two other fixes from the same pass, unrelated to OCR:** the frontend-design pass's
+  signature mark (the squiggle beside the wordmark, and the underline-reveal under a looked-up
+  word) was removed entirely per feedback ("not liking it at all... clean UI") — debashis9 may
+  revisit a quieter mark later (a corner-fold glyph or a single hand-drawn tick were floated as
+  options, not built). Copy changed for clarity: "Save this sense" → **"Save this meaning"**
+  (hint text updated to match: "N meanings found..."), and "Master it"/"Mastered" →
+  **"Learned it"/"Learned"** (the original read as the app commanding the user to go master a
+  word they'd just looked up, rather than a self-assessment flag) — both chosen by debashis9
+  from a few options rather than picked unilaterally.
 
 ## Picking up next session
-- **Immediate next steps on `future/ocr-offline-library` (paused here 2026-08-02):**
-  1. `cd worker && npm run deploy` — the punctuation-stripping fix hasn't gone out yet.
-  2. Test OCR on a real Android phone (not just desktop Chrome via `localhost:8000`) — camera
-     permission, live preview, real-world capture quality, and whether double-tap-zoom actually
-     feels usable with real fingers are all still unverified. Needs a secure context, so either
-     the Chrome `chrome://inspect` USB port-forwarding trick (reuses the existing
-     `localhost:8000` Supabase redirect-URL allowlist entry, no new config) or the real deployed
-     GitHub Pages URL.
-  3. Once both offline mode and OCR check out live, decide whether to merge this branch to
-     `main` — nothing here is blocking that except actually finishing the verification above.
+- **The crop+streaming OCR rework is now verified live and committed (2026-08-04) — pick up
+  from here:**
+  1. `sw.js` is at `v35`. The Worker (`worker/src/index.js`) is deployed live and matches what's
+     committed — no pending redeploy.
+  2. Decide whether to test on a real Android phone (optional — "Choose a photo" with a
+     phone-taken picture has already fully exercised OCR recognition/crop/streaming; only the
+     live-camera-specific UX, getUserMedia permission prompt and viewfinder, remains untested,
+     and debashis9 has been hesitant about granting camera permissions on mobile). If skipped,
+     that's a deliberate choice, not a gap to chase.
+  3. Once comfortable, decide whether to merge `future/ocr-offline-library` to `main`. Offline
+     mode (Phase 2b, on the same branch) was already verified live in an earlier session; OCR is
+     now verified live too (both crop+streaming and the follow-up bug-fix round) — nothing left
+     blocking a merge except the Android-phone question above, which is optional.
   4. Local dev note: `worker/` and the project root are separate directories with their own
      unrelated file listings — running `python3 -m http.server` from inside `worker/` by
      mistake (easy to do right after running deploy commands from there) serves the Worker's
@@ -309,11 +395,11 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   suspicion. No code or config change was needed.
 
 ## To-do
-- **Merge `future/ocr-offline-library` to `main`, once verified live.** Phase 2b (offline
-  caching) is implemented on this branch — see Current state above — but not yet merged; OCR
-  camera-capture is on the same branch and further behind on verification (Worker redeploy
-  pending, no real-phone test yet). See "Picking up next session" above for the concrete
-  remaining steps.
+- **Merge `future/ocr-offline-library` to `main`, when ready.** Phase 2b (offline caching) and
+  OCR camera-capture (crop-before-send + streaming) are both implemented and verified live on
+  this branch now — see Current state above. Nothing left blocking a merge except an optional
+  real-Android-phone test debashis9 has been hesitant about (permission comfort, not a
+  technical gap) — see "Picking up next session" above.
 - **Worker rate limiting.** Flagged when the Worker had no auth check at all; matters less
   now that every request needs a real signed-in Supabase session (see M4 above), but still
   not there as defense-in-depth against a compromised or overly-eager signed-in account.
@@ -390,8 +476,8 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 - **Phase 2b: DONE, on `future/ocr-offline-library`, not yet merged to `main`** — offline
   caching / local-first sync, using the IndexedDB code that had been kept around unused for
   exactly this (see Current state above for details).
-- **OCR camera-capture: on the same branch, implemented but not yet fully verified live** —
-  see Current state above and "Picking up next session" for exact remaining steps.
+- **OCR camera-capture: DONE and verified live on the same branch** (crop-before-send +
+  streaming word list, plus a follow-up bug-fix round) — see Current state above.
 
 ## Working style
 Explain changes in plain terms — I'm learning. Prefer small, reviewable steps over large
