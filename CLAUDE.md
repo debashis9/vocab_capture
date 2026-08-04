@@ -451,17 +451,17 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
     (Supabase stubbed): no horizontal overflow, both dropdowns inside the screen, crop buttons
     on screen without scrolling, a drag-then-tap keeping its selection, the resting word marker
     having no fill, the progress line counting up and reaching its done state, and a tapped word
-    staying marked. **Not verified: a real phone** — that's debashis9's next test.
+    staying marked. **Confirmed on a real phone by debashis9, 2026-08-04** — the fixes hold up
+    in use; the word marking is readable against real paper.
 
 ## Picking up next session
 - **Everything is merged to `main` and pushed.** The three parked features (offline mode, OCR,
   book library) all landed on `main`; `future/ocr-offline-library` is now a leftover branch, not
   where work happens.
-- **Next: re-test on the phone after the 2026-08-04 mobile-usability round** (see the entry at
-  the end of Current state). Specifically worth a look: the crop screen's sticky Scan buttons,
-  the Reading row's wrapped layout with the library dropdown, and whether the new underline/
-  translucent-wash word marking is actually readable on a real photographed page — the marker
-  colours were picked against synthetic test images, so real paper is the honest test.
+- **The 2026-08-04 mobile-usability round is verified on a real phone** (sticky crop buttons,
+  the wrapped Reading row + library dropdown, the underline/translucent-wash word marking, the
+  streaming progress line) — see the entry at the end of Current state. Nothing outstanding
+  from it.
   1. **Done 2026-08-04:** `supabase/sql/books-table.sql` is run, a real book was scanned in
      successfully, and the Library screen renders correctly against the real table — book
      scanning/library is fully verified, nothing left to check there.
