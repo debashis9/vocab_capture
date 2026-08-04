@@ -147,6 +147,12 @@
       padding: 6px 2px; font: inherit; color: var(--ink);
     }
     .book-row input:focus { outline: none; border-bottom-color: var(--oxblood); }
+    /* The library quick-pick. Fixed width, never content width -- see the
+       note on .book-filter below for why. Without this the select stretched
+       to fit the longest book title, pushing past the right edge of a phone
+       screen and squeezing the input next to it down to nothing, so the book
+       you'd just picked was filled in but invisible. */
+    .book-row .book-filter { flex: 0 0 auto; width: 104px; }
 
     /* ---- Lookup bar ---- */
     .lookup { display: flex; gap: 10px; }
@@ -333,13 +339,19 @@
 
     /* ---- Saved list ---- */
     .saved-section { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--line); }
-    .saved-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .saved-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
     .saved-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 20px; margin: 0; }
-    .saved-header-actions { display: flex; align-items: center; gap: 8px; }
+    .saved-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
     .book-filter {
       font: inherit; font-size: 13px; color: var(--ink-soft);
       background: var(--paper-2); border: 1px solid var(--line);
       border-radius: 8px; padding: 6px 10px;
+      /* A <select> sizes itself to its widest <option>, so a single long
+         book title used to stretch it clear off the right edge of a phone
+         screen (the page scrolled sideways). Cap it and let the closed
+         label ellipsize -- the native popup still shows every title in
+         full when it's open. */
+      flex: 0 1 auto; min-width: 0; max-width: 150px; text-overflow: ellipsis;
     }
     .btn-practice {
       font-size: 13px;
@@ -475,12 +487,58 @@
     .ocr-zoom-wrapper img {
       display: block; max-width: 100%; max-height: 60vh; width: auto; height: auto;
     }
+    /* The tappable words sit directly on top of the photographed word, so
+       the marking has to leave the word itself readable -- an opaque fill
+       hides exactly the thing you're trying to read, and on a curved page
+       you often need the neighbouring letters to be sure you tapped the
+       right one. So: a pen-like underline at rest (visible on a phone,
+       which has no hover, so you can see at a glance which words were
+       recognized) and a translucent wash, never a solid box, when pressed.
+       The colours are rgba rather than the theme variables because the
+       backdrop here is always the photo, not the app's own background. */
     .ocr-word-choice {
       position: absolute; background: transparent; border: none; padding: 0;
       border-radius: 3px;
+      box-shadow: inset 0 -2px 0 rgba(138, 48, 51, 0.45);
+      /* Mobile's default tap flash is an opaque grey box -- the exact thing
+         being fixed here. */
+      -webkit-tap-highlight-color: rgba(138, 48, 51, 0.2);
     }
-    .ocr-word-choice:hover, .ocr-word-choice:focus-visible {
-      background: var(--oxblood-soft); outline: 2px solid var(--oxblood);
+    .ocr-word-choice:hover, .ocr-word-choice:focus-visible, .ocr-word-choice:active {
+      background: rgba(138, 48, 51, 0.22);
+      outline: 2px solid var(--oxblood);
+    }
+    /* Stays marked after a tap, so returning to the photo shows which words
+       have already been looked up instead of having to tap one again to
+       find out. */
+    .ocr-word-choice.looked-up {
+      background: rgba(138, 48, 51, 0.13);
+      box-shadow: inset 0 -2px 0 rgba(138, 48, 51, 0.9);
+    }
+    /* A brief flash as each word lands -- the visible sign, on the photo
+       itself, that the scan is still working its way down the page. */
+    .ocr-word-choice.just-arrived { animation: ocrWordIn 0.7s ease-out; }
+    @keyframes ocrWordIn {
+      from { background: rgba(138, 48, 51, 0.45); }
+      to   { background: transparent; }
+    }
+
+    /* Live progress while words stream in: a count that keeps moving is the
+       difference between "still working" and "did this freeze?". */
+    .ocr-progress {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--ink-soft); font-size: 13px; margin: 0 0 10px;
+    }
+    .ocr-progress-dot {
+      flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--oxblood); animation: ocrPulse 1.1s ease-in-out infinite;
+    }
+    .ocr-progress.done { color: var(--ink); }
+    .ocr-progress.done .ocr-progress-dot { background: var(--good); animation: none; }
+    @keyframes ocrPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+    @media (prefers-reduced-motion: reduce) {
+      .ocr-word-choice.just-arrived { animation: none; }
+      .ocr-progress-dot { animation: none; }
     }
     /* Same shrink-wrap/percent-positioning idiom as .ocr-zoom-wrapper --
        the drag-drawn selection box is positioned as a percent of this
@@ -504,6 +562,17 @@
       position: absolute; border: 2px dashed var(--oxblood);
       background: rgba(138, 48, 51, 0.15);
       pointer-events: none;
+    }
+    /* Sticky, so the Scan buttons are always on screen on a phone. A tall
+       photo easily pushes them below the fold, and scrolling down to them
+       means dragging a finger across the photo -- which starts a new
+       selection and wipes the one that was just carefully drawn. Pinned to
+       the bottom of the viewport, they never have to be scrolled to. */
+    .crop-actions {
+      position: sticky; bottom: 0; z-index: 5;
+      margin-top: 14px;
+      padding: 10px 0 calc(4px + env(safe-area-inset-bottom));
+      background: var(--paper);
     }
 
     /* ---- Library (book scanning) ---- */
@@ -613,6 +682,32 @@
     }
     .admin-empty { color: var(--ink-soft); font-size: 14px; padding: 12px 2px 0; }
     .admin-denied { color: var(--oxblood); font-size: 15px; }
+
+    /* ---- Narrow screens (phones) ---- */
+    @media (max-width: 520px) {
+      /* "Reading" and the library quick-pick share the first line, the text
+         input gets the whole second line. On a phone there simply isn't room
+         for label + input + dropdown side by side without the input being
+         squeezed to a slit. Only the Reading row wraps -- the Sentence row
+         has no dropdown and still fits on one line. */
+      .book-row-reading { flex-wrap: wrap; }
+      .book-row-reading .book-filter { margin-left: auto; }
+      .book-row-reading input { order: 3; flex: 1 1 100%; }
+      /* Same problem one row down: the word field, the mic, the scan button
+         and "Look up" sharing one phone-width line left the field itself
+         about five characters wide. The field gets the full line; the three
+         buttons share the next one. */
+      .lookup { flex-wrap: wrap; }
+      .word-field { flex: 1 1 100%; }
+      .lookup #go { flex: 1; }
+      /* On their own line these no longer stretch to the word field's
+         height, so they need a real one -- 22px is not a touch target. */
+      .lookup .btn-mic, .lookup #go { min-height: 46px; }
+      /* Leaves room for the crop screen's header, tip and sticky buttons
+         without the photo alone filling the whole viewport. */
+      .crop-viewport img { max-height: 50vh; }
+      .camera-section, .library-section, .practice-section { margin-top: 30px; padding-top: 20px; }
+    }
   </style>
 </head>
 
@@ -653,11 +748,11 @@
            book-select is a quick-pick from the library (added order) --
            choosing one just fills the text input below, so typing a book
            that isn't in the library still works exactly as before. -->
-      <div class="book-row">
+      <div class="book-row book-row-reading">
         <label for="book">Reading</label>
         <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
         <select id="book-select" class="book-filter" hidden aria-label="Pick from your library">
-          <option value="">From library…</option>
+          <option value="">Library…</option>
         </select>
       </div>
 
@@ -1916,7 +2011,7 @@
     // Elements hidden while a practice session is open, restored on close.
     function practiceToggleTargets() {
       return [
-        document.querySelector(".book-row"),
+        ...document.querySelectorAll(".book-row"), // both Reading and Sentence
         document.querySelector(".lookup"),
         out,
         document.querySelector(".foot"),
@@ -2143,7 +2238,14 @@
       if (e.target.id === "crop-confirm") { scanCroppedRegion(currentCropCanvas, cropSelection); return; }
       if (e.target.id === "crop-whole") { scanCroppedRegion(currentCropCanvas, null); return; }
       const wordBtn = e.target.closest(".ocr-word-choice");
-      if (wordBtn) { selectOcrWord(wordBtn.dataset.word); return; }
+      if (wordBtn) {
+        // Marked here rather than inside selectOcrWord() so the mark belongs
+        // to the button that was actually tapped, not to every instance of
+        // the same word on the page.
+        wordBtn.classList.add("looked-up");
+        selectOcrWord(wordBtn.dataset.word);
+        return;
+      }
       if (e.target.id === "camera-retry") { renderCameraChooser(); return; }
     });
 
@@ -2227,7 +2329,7 @@
 
     function cameraToggleTargets() {
       return [
-        document.querySelector(".book-row"),
+        ...document.querySelectorAll(".book-row"), // both Reading and Sentence
         document.querySelector(".lookup"),
         out,
         document.querySelector(".foot"),
@@ -2250,6 +2352,9 @@
       // #camera-body was never torn down) -- only start over from the
       // chooser if there's nothing to resume.
       if (!ocrSessionOpen) renderCameraChooser();
+      // The scan UI is the last section on the page, so on a phone it opens
+      // below the fold unless we bring it up.
+      $("camera-section").scrollIntoView({ block: "start" });
     }
 
     // The one real exit: aborts any in-flight stream and discards the
@@ -2331,7 +2436,7 @@
           <h2 class="saved-title">Scan a page</h2>
           <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
         </div>
-        <p class="status">Reading the page…</p>
+        <p class="ocr-progress"><span class="ocr-progress-dot"></span><span>Reading the page… the first words usually appear within a few seconds.</span></p>
       `;
     }
 
@@ -2392,12 +2497,17 @@
           <img id="crop-image" src="${dataUrl}" width="${canvas.width}" height="${canvas.height}" alt="Captured page" draggable="false" />
           <div id="crop-box" class="crop-box" hidden></div>
         </div>
-        <div class="practice-mode-buttons">
+        <div class="practice-mode-buttons crop-actions">
           <button id="crop-confirm" type="button" disabled>Scan selected area</button>
           <button id="crop-whole" type="button" class="btn-practice-nav">Scan whole photo</button>
         </div>
       `;
       wireCropSelection();
+      // Put the photo at the top of the screen rather than wherever the page
+      // happened to be scrolled to -- on a phone the crop screen starts well
+      // below the fold, so without this the first thing you see after picking
+      // a photo is the middle of it, with no header and no buttons.
+      $("camera-section").scrollIntoView({ block: "start" });
     }
 
     // Drag-to-draw, not drag-to-adjust-handles -- simplest of the real
@@ -2425,6 +2535,23 @@
         box.style.width = Math.abs(x2 - x1) + "%";
         box.style.height = Math.abs(y2 - y1) + "%";
       };
+      // Redraw whatever selection is currently committed (or hide the box if
+      // there isn't one). Used after a tap or a too-small drag, so brushing
+      // the photo -- easy to do when reaching past it -- doesn't throw away a
+      // selection that took a careful drag to make.
+      const showCommittedSelection = () => {
+        if (!cropSelection) {
+          box.hidden = true;
+          confirmBtn.disabled = true;
+          return;
+        }
+        box.hidden = false;
+        applyBoxStyle(
+          cropSelection.left, cropSelection.top,
+          cropSelection.left + cropSelection.width, cropSelection.top + cropSelection.height,
+        );
+        confirmBtn.disabled = false;
+      };
 
       const finishDrag = (e) => {
         if (!dragging) return;
@@ -2434,11 +2561,10 @@
         const top = Math.min(startY, p.y);
         const width = Math.abs(p.x - startX);
         const height = Math.abs(p.y - startY);
-        // A tap or a tiny accidental drag isn't a real selection.
+        // A tap or a tiny accidental drag isn't a real selection -- put the
+        // previous one back rather than clearing it.
         if (width < 3 || height < 3) {
-          box.hidden = true;
-          cropSelection = null;
-          confirmBtn.disabled = true;
+          showCommittedSelection();
           return;
         }
         cropSelection = { left, top, width, height };
@@ -2583,7 +2709,12 @@
 
       if (!sawAnyWord) {
         renderCameraError("No words found. Try again, or make sure the photo is clear and well-lit.");
+        return;
       }
+      setOcrProgress(
+        `${ocrWordCount} ${ocrWordCount === 1 ? "word" : "words"} found — tap one to look it up`,
+        true,
+      );
     }
 
     // Renders the captured photo plus an (initially empty) container for
@@ -2597,12 +2728,17 @@
     // width/height attributes, to hint its aspect ratio before it loads
     // (avoids layout shift).
     function renderCameraWordOverlayShell(dataUrl, baseWidth, baseHeight) {
+      ocrWordCount = 0;
       $("camera-body").innerHTML = `
         <div class="practice-head">
           <h2 class="saved-title">Tap a word to look it up</h2>
           <button id="camera-close" type="button" class="btn-practice-close" aria-label="Close scan">×</button>
         </div>
-        <p class="practice-hint">Words appear as they're recognized — tap one, or double-tap the photo to zoom in.</p>
+        <p id="ocr-progress" class="ocr-progress">
+          <span class="ocr-progress-dot"></span>
+          <span id="ocr-progress-text">Reading the page…</span>
+        </p>
+        <p class="practice-hint">Underlined words are ready to tap — double-tap the photo to zoom in.</p>
         <div id="ocr-viewport" class="ocr-viewport">
           <div id="ocr-zoom-wrapper" class="ocr-zoom-wrapper">
             <img src="${dataUrl}" width="${baseWidth}" height="${baseHeight}" alt="Captured page" />
@@ -2610,6 +2746,17 @@
         </div>
       `;
       wireOcrZoom();
+    }
+
+    // How many words have landed on the current photo -- reset per scan,
+    // shown live so a long page doesn't look frozen while it streams.
+    let ocrWordCount = 0;
+
+    function setOcrProgress(text, done) {
+      const line = $("ocr-progress");
+      if (!line) return; // the overlay screen isn't up (paused, closed, or an error)
+      $("ocr-progress-text").textContent = text;
+      line.classList.toggle("done", !!done);
     }
 
     // Built via the DOM API (not an innerHTML string) so there's no need
@@ -2626,7 +2773,11 @@
       btn.style.width = ((xmax - xmin) / 1000) * 100 + "%";
       btn.style.height = ((ymax - ymin) / 1000) * 100 + "%";
       btn.setAttribute("aria-label", w.text);
+      btn.classList.add("just-arrived");
       $("ocr-zoom-wrapper").appendChild(btn);
+
+      ocrWordCount += 1;
+      setOcrProgress(`Reading the page… ${ocrWordCount} ${ocrWordCount === 1 ? "word" : "words"} so far`);
     }
 
     // Double-tap toggles ~2x zoom centered on the tap point. A double-tap
@@ -2682,7 +2833,7 @@
 
     function libraryToggleTargets() {
       return [
-        document.querySelector(".book-row"),
+        ...document.querySelectorAll(".book-row"), // both Reading and Sentence
         document.querySelector(".lookup"),
         out,
         document.querySelector(".foot"),
@@ -2978,7 +3129,7 @@
         return;
       }
       const ordered = [...books].sort((a, b) => new Date(a.addedAt) - new Date(b.addedAt));
-      select.innerHTML = `<option value="">From library…</option>`
+      select.innerHTML = `<option value="">Library…</option>`
         + ordered.map((b) => `<option value="${escapeHtml(b.title)}">${escapeHtml(b.title)}</option>`).join("");
       select.hidden = false;
     }
