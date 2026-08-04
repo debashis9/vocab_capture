@@ -127,8 +127,12 @@ export default {
         // of going through json() below, since the client needs to start
         // rendering tappable words before the whole page finishes OCR-ing.
         return streamOcr(body.image, env, corsHeaders);
+      } else if (url.pathname === "/book-lookup") {
+        if (!body.image) return json({ error: "Missing 'image'" }, 400, corsHeaders);
+        const result = await lookupBookCover(body.image, env);
+        return json(result, 200, corsHeaders);
       } else {
-        return json({ error: "Not found. Use /define-gemma, /define, or /ocr." }, 404, corsHeaders);
+        return json({ error: "Not found. Use /define-gemma, /define, /ocr, or /book-lookup." }, 404, corsHeaders);
       }
     } catch (err) {
       return json({ error: "Lookup failed", detail: String(err) }, 502, corsHeaders);
@@ -263,6 +267,64 @@ async function lookupGemma(word, book, userMessage, env, modelKey) {
 
   const cleaned = fullText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
   return { ...JSON.parse(cleaned), word, _timing: { ttft_ms: ttftMs, total_ms: totalMs } };
+}
+
+// A book's ISBN is always printed as human-readable digits right next to its
+// barcode (and often again on the copyright page), so reading a photo with
+// the same vision model already integrated is enough -- no dedicated
+// barcode-decoding library needed. One small result, not a growing list, so
+// this follows lookupGemma's single-awaited-call shape, not /ocr's streaming
+// one. OCR_MODEL (below) is reused since it's already proven to accept image
+// input via inlineData.
+const BOOK_LOOKUP_PROMPT = `Look at this photo of a book -- its back cover, spine, barcode area, or \
+title/copyright page. Find its ISBN (prefer the ISBN-13, the one starting with 978 or 979, if both \
+an ISBN-10 and ISBN-13 are printed), title, and author. If you can't find a real book here, or can't \
+read enough to be confident, return null for whatever you couldn't read -- don't guess. Output ONLY \
+this JSON, no markdown fences, no other text: {"isbn": string|null, "title": string|null, "author": string|null}`;
+
+async function lookupBookCover(imageBase64, env) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${OCR_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: BOOK_LOOKUP_PROMPT },
+            { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+          ],
+        }],
+        generationConfig: {
+          maxOutputTokens: 300,
+          thinkingConfig: { thinkingLevel: "minimal" },
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`Gemini API HTTP ${res.status}: ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const text = parts.find((p) => !p.thought && p.text)?.text;
+  if (!text) {
+    const finishReason = data.candidates?.[0]?.finishReason;
+    throw new Error(`No answer text in Gemini book-lookup response (finishReason: ${finishReason})`);
+  }
+
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const parsed = JSON.parse(cleaned);
+  return {
+    isbn: typeof parsed.isbn === "string" ? parsed.isbn.replace(/[^0-9Xx]/g, "") || null : null,
+    title: typeof parsed.title === "string" ? parsed.title.trim() || null : null,
+    author: typeof parsed.author === "string" ? parsed.author.trim() || null : null,
+  };
 }
 
 // Verified live against this exact key (2026-08-02, via a real

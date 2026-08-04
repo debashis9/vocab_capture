@@ -360,21 +360,72 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   word they'd just looked up, rather than a self-assessment flag) — both chosen by debashis9
   from a few options rather than picked unilaterally.
 
+- **Book scanning / library, built 2026-08-04, on `future/ocr-offline-library` — the last of
+  the three features parked on this branch from the 2026-08-02 competitor research** (OCR and
+  offline mode were the other two, both already done). Scan a book's back cover or barcode
+  area; a new Worker endpoint (`/book-lookup`, same `verifySupabaseAuth`/CORS pattern as every
+  other route) reads the printed ISBN, title, and author with the same Gemini vision model
+  already used for OCR (`OCR_MODEL`) — deliberately **not** a client-side barcode-decoding
+  library, for the same reason Gemini was picked over Tesseract.js for OCR: no second CDN
+  dependency (Supabase JS stays the one exception), and a book's ISBN digits are always printed
+  as human-readable text right next to the barcode, so a photo is enough. Unlike `/ocr`, this
+  is a single non-streaming call (`lookupBookCover`, following `/define-gemma`'s shape) — one
+  small result, not a growing word list, so there's no reason for SSE here.
+  **Purely additive, no migration risk:** `entries.book` is untouched — still plain text, still
+  the same exact-match filter (`populateBookFilter`). A new `books` table
+  (`supabase/sql/books-table.sql` — **debashis9 needs to run this in the Supabase SQL editor
+  before the feature works**, same as every other `supabase/sql/*.sql` file in this repo; not
+  something I can run myself) is a convenience layer on top: RLS scoped to
+  `auth.uid() = user_id` (the same per-row-ownership shape `entries` already uses, not
+  `allowed_emails`' hardcoded-admin shape, which is the wrong model for a personal list),
+  `unique(user_id, isbn)` so re-scanning a book upserts instead of duplicating (manual entries
+  with no isbn always insert fresh — Postgres treats multiple NULLs as distinct for a unique
+  constraint). Cover art needs no API call at all —
+  `https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg` is a bare, keyless image URL, with an
+  `onerror` fallback to a placeholder for missing-isbn or no-cover-on-file books.
+  New "Library" button next to Practice opens a dedicated screen (books listed with cover
+  thumbnail/title/author/date, tap one to fill the "Reading" field, Delete per row — a plain
+  hard delete, not soft-deleted like `allowed_emails`, since this isn't an audited security
+  boundary) plus an "Add a book" flow (take/choose photo, `/book-lookup`, confirm, or "Enter it
+  manually instead" as a safety net for glare/damaged-cover misses, same never-a-dead-end
+  spirit as the dictionary tab's not-found handling). **Deliberately a separate, small
+  implementation from the OCR camera flow**, not sharing its crop/streaming/pause-resume state
+  machine — that exists specifically for "tap a word from a growing list," which doesn't apply
+  to a single-shot book lookup; only the generic chooser/live-preview/downscale shape is
+  mirrored, not literally shared code. If a third capture flow ever shows up, that's the
+  trigger to factor out a shared helper, not before.
+  **Verified:** the real Gemini call against a synthetic test cover (title, author, and a
+  hyphenated ISBN all correctly extracted and cleaned to digits-only, roughly a 3.8-second round
+  trip); the full client flow end-to-end in a headless browser with mocked `/book-lookup` and
+  Supabase REST calls (empty state, scan through to confirm, appears with cover, tap-to-select
+  fills "Reading", delete, manual-entry fallback, and the cover-image-404 placeholder fallback)
+  — zero console errors, and a full regression pass confirmed the existing
+  saved-list/book-filter/lookup flow is untouched. **Not yet verified: a real hands-on test with
+  an actual physical book**, and the `books-table.sql` migration hasn't been run yet — both need
+  debashis9, same as OCR's own path to verification.
+
 ## Picking up next session
-- **The crop+streaming OCR rework is now verified live and committed (2026-08-04) — pick up
-  from here:**
-  1. `sw.js` is at `v35`. The Worker (`worker/src/index.js`) is deployed live and matches what's
+- **Book scanning/library is built (2026-08-04) but needs two things from debashis9 before
+  it's verified live — pick up exactly here:**
+  1. **Run `supabase/sql/books-table.sql` in the Supabase SQL editor.** Nothing about the
+     Library screen will actually persist until this table exists — I can't run it myself, same
+     as every other file in `supabase/sql/`.
+  2. **A real hands-on test with an actual book**: open the app, tap Library → Add a book, take
+     a real photo of a book's back cover or barcode, and confirm the ISBN/title/author come back
+     right and the cover art loads. This is the one piece only debashis9 can do — everything
+     checkable without a real photo/real database has already been checked (see the
+     verification paragraph above).
+  3. Once that checks out, all three originally-parked features on `future/ocr-offline-library`
+     (offline mode, OCR, book library) are done and verified — decide whether to merge to
+     `main`. The Android-phone OCR test remains optional/deferred, not a blocker (see below).
+  4. `sw.js` is at `v36`. The Worker (`worker/src/index.js`) is deployed live and matches what's
      committed — no pending redeploy.
-  2. Decide whether to test on a real Android phone (optional — "Choose a photo" with a
+  5. Decide whether to test OCR on a real Android phone (optional — "Choose a photo" with a
      phone-taken picture has already fully exercised OCR recognition/crop/streaming; only the
      live-camera-specific UX, getUserMedia permission prompt and viewfinder, remains untested,
      and debashis9 has been hesitant about granting camera permissions on mobile). If skipped,
      that's a deliberate choice, not a gap to chase.
-  3. Once comfortable, decide whether to merge `future/ocr-offline-library` to `main`. Offline
-     mode (Phase 2b, on the same branch) was already verified live in an earlier session; OCR is
-     now verified live too (both crop+streaming and the follow-up bug-fix round) — nothing left
-     blocking a merge except the Android-phone question above, which is optional.
-  4. Local dev note: `worker/` and the project root are separate directories with their own
+  6. Local dev note: `worker/` and the project root are separate directories with their own
      unrelated file listings — running `python3 -m http.server` from inside `worker/` by
      mistake (easy to do right after running deploy commands from there) serves the Worker's
      source files instead of the app; `cd` back to the repo root first.
@@ -395,11 +446,12 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   suspicion. No code or config change was needed.
 
 ## To-do
-- **Merge `future/ocr-offline-library` to `main`, when ready.** Phase 2b (offline caching) and
-  OCR camera-capture (crop-before-send + streaming) are both implemented and verified live on
-  this branch now — see Current state above. Nothing left blocking a merge except an optional
-  real-Android-phone test debashis9 has been hesitant about (permission comfort, not a
-  technical gap) — see "Picking up next session" above.
+- **Merge `future/ocr-offline-library` to `main`, when ready.** All three originally-parked
+  features are now implemented — Phase 2b (offline caching) and OCR camera-capture are verified
+  live; book scanning/library needs debashis9 to run `supabase/sql/books-table.sql` and do one
+  real-photo hands-on test first (see "Picking up next session" above). Once that's done,
+  nothing blocks a merge except an optional real-Android-phone OCR test debashis9 has been
+  hesitant about (permission comfort, not a technical gap).
 - **Worker rate limiting.** Flagged when the Worker had no auth check at all; matters less
   now that every request needs a real signed-in Supabase session (see M4 above), but still
   not there as defense-in-depth against a compromised or overly-eager signed-in account.
