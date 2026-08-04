@@ -649,10 +649,16 @@
         <button id="sign-out" type="button" class="btn-signout">Sign out</button>
       </div>
 
-      <!-- Book this word came from. Value is remembered between sessions. -->
+      <!-- Book this word came from. Value is remembered between sessions.
+           book-select is a quick-pick from the library (added order) --
+           choosing one just fills the text input below, so typing a book
+           that isn't in the library still works exactly as before. -->
       <div class="book-row">
         <label for="book">Reading</label>
         <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+        <select id="book-select" class="book-filter" hidden aria-label="Pick from your library">
+          <option value="">From library…</option>
+        </select>
       </div>
 
       <!-- The sentence from the book itself, as opposed to `example` -- the
@@ -783,6 +789,7 @@
       // Saved words are per-account now, so (re)load them the moment we know
       // who's signed in — on initial load and again after a fresh sign-in.
       refreshSavedList();
+      populateBookSelect();
       // Covers reopening the app already online with leftover queued words
       // from a previous offline session (the "online" event below only
       // fires on an actual reconnect transition, not on a normal load).
@@ -2927,6 +2934,7 @@
       try {
         await saveBook({ isbn: isbn || null, title, author: author || null });
         await renderLibraryList();
+        populateBookSelect();
       } catch (err) {
         renderLibraryError("Couldn't save that book: " + err.message);
       }
@@ -2943,10 +2951,45 @@
       try {
         await deleteBook(id);
         await renderLibraryList();
+        populateBookSelect();
       } catch (err) {
         renderLibraryError("Couldn't delete that book: " + err.message);
       }
     }
+
+    // Quick-pick dropdown on the main "Reading" row -- separate from the
+    // Library screen's own list, which is sorted newest-first for finding a
+    // just-scanned book quickly. This one is oldest-first (added order), a
+    // stable, predictable order for a small pick-list you'll reuse often.
+    // Choosing an option only fills the existing text input (same as tapping
+    // a book in the Library screen) and resets itself, rather than holding
+    // a selected state -- the text input stays the one source of truth, so
+    // typing a book that isn't in the library still works exactly as before.
+    async function populateBookSelect() {
+      const select = $("book-select");
+      let books;
+      try {
+        books = await getBooks();
+      } catch {
+        return; // signed out, or a real fetch error -- leave the select as-is either way
+      }
+      if (!books.length) {
+        select.hidden = true;
+        return;
+      }
+      const ordered = [...books].sort((a, b) => new Date(a.addedAt) - new Date(b.addedAt));
+      select.innerHTML = `<option value="">From library…</option>`
+        + ordered.map((b) => `<option value="${escapeHtml(b.title)}">${escapeHtml(b.title)}</option>`).join("");
+      select.hidden = false;
+    }
+
+    $("book-select").addEventListener("change", (e) => {
+      const title = e.target.value;
+      if (!title) return;
+      $("book").value = title;
+      $("book").dispatchEvent(new Event("input"));
+      e.target.value = "";
+    });
 
     $("library-open").addEventListener("click", openLibrarySection);
     $("library-section").addEventListener("click", (e) => {
