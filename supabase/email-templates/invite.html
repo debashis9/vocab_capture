@@ -1,0 +1,119 @@
+<!--
+  Supabase "Invite user" email template for Margin.
+
+  This file is a tracked copy for reference/version control only — the
+  actual live template is whatever's pasted into the Supabase dashboard at
+  Authentication → Emails → Templates → Invite user. If you edit one, edit
+  the other so they don't drift.
+
+  This is the FIRST email a new person ever gets from Margin. It's sent by
+  supabase/functions/approve-access/index.ts calling inviteUserByEmail(),
+  which happens when you tap Approve on a request in #admin. Until that
+  function existed nothing here ever sent an invite, which is why only the
+  Magic Link template was customized back in July — see CLAUDE.md.
+
+  Because it's a first arrival rather than a returning sign-in, the wording
+  differs from magic-link.html in three ways: it says who added them and why
+  they're getting it, it gives the guide real weight instead of a footnote,
+  and it says what to do if the link has expired (their account already
+  exists by this point, so the normal "Send me a link" box works).
+
+  Supabase variables used:
+    {{ .ConfirmationURL }}  the one-time link that signs them in
+    {{ .Email }}            the address that was invited
+  Subject line to set in the dashboard alongside this body:
+    You're in — welcome to Margin
+
+  Written as email-safe HTML: table layout, inline styles, web-safe font
+  fallbacks (Georgia / system sans) since most email clients strip <style>
+  blocks or block custom web fonts entirely — this deliberately does not
+  try to load Fraunces/Inter the way the app and guide do.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>You're in — welcome to Margin</title>
+</head>
+<body style="margin:0; padding:0; background-color:#FBF9F4;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FBF9F4;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px; width:100%;">
+
+          <!-- Brand -->
+          <tr>
+            <td style="padding-bottom:24px;">
+              <span style="font-family:Georgia,'Times New Roman',serif; font-weight:700; font-size:30px; color:#23201B;">
+                Margin<span style="color:#8A3033;">.</span>
+              </span>
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background-color:#FFFFFF; border:1px solid #E3DDD0; border-radius:16px; padding:32px;">
+              <p style="margin:0 0 12px; font-family:Georgia,'Times New Roman',serif; font-size:21px; line-height:1.4; color:#23201B;">
+                You're in.
+              </p>
+
+              <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:16px; line-height:1.6; color:#23201B;">
+                Debashis has added <strong style="color:#23201B;">{{ .Email }}</strong> to Margin — a small app for
+                catching words you meet while reading, looking them up, and keeping them.
+              </p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
+                <tr>
+                  <td style="background-color:#8A3033; border-radius:10px;">
+                    <a href="{{ .ConfirmationURL }}"
+                       style="display:inline-block; padding:14px 28px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:15px; font-weight:700; color:#FBF9F4; text-decoration:none; border-radius:10px;">
+                      Open Margin
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
+                That's a one-time link, so use it soon. If it's already expired by the time you
+                get to it, no harm done — open Margin and use <strong style="color:#6B6459;">Send me a link</strong>
+                to get a fresh one. Your account is set up either way.
+              </p>
+
+              <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
+                Weren't expecting this? You can safely ignore this email — nothing happens
+                unless the link above is opened.
+              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px; border-top:1px solid #E3DDD0;">
+                <tr>
+                  <td style="padding-top:20px;">
+                    <p style="margin:0 0 8px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:14px; font-weight:700; line-height:1.5; color:#23201B;">
+                      First time here?
+                    </p>
+                    <p style="margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
+                      There's a short guide to what Margin does and how to install it on your
+                      phone — worth two minutes before you start:<br />
+                      <a href="https://debashis9.github.io/vocab_capture/guide.html" style="color:#8A3033; font-weight:700;">
+                        debashis9.github.io/vocab_capture/guide.html
+                      </a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 4px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:12.5px; color:#6B6459; text-align:center;">
+              Margin — a personal vocabulary-capture app.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
