@@ -508,8 +508,10 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
     copy of the Supabase SDK and the route-based stub silently stops applying.
 
 - **Self-serve onboarding: an access-request queue, built 2026-08-05 on branch
-  `onboarding-approval-flow`. Code complete, database and Edge Function live, NOT yet tested
-  end to end with a real person.** This closes a gap that had been there since the invite list
+  `onboarding-approval-flow`. Code complete, database and Edge Function live, and VERIFIED END
+  TO END on 2026-08-05** against `localhost:8000` with `debashis9389@gmail.com`: request
+  captured → queue → Approve → `auth.users` row created → branded invite delivered. The only
+  surprise was where it landed — see the spam note below. This closes a gap that had been there since the invite list
   was built: `allowed_emails` is *not* a login list, it's a permission check the
   `before insert on auth.users` trigger consults **at the moment an account is created**.
   Adding an email on `#admin` therefore granted permission for an account that nothing in the
@@ -602,21 +604,21 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 ## Picking up next session
 - **Branch `onboarding-approval-flow` is the live work.** Not merged, not pushed. `main` is
   otherwise still where everything else landed.
-- **The onboarding queue needs one real end-to-end run before it can be called done.** The
-  database side and the authorization side are verified live (see Current state); what is *not*
-  tested is the part that sends actual email — approving a real request and having a real
-  person receive an invite and get in. Test it with one address you control before letting
-  anyone else near it. Two things to check while doing it:
-  1. **Paste `supabase/email-templates/invite.html` into the dashboard first** (Authentication
-     → Emails → Templates → Invite user, subject "You're in — welcome to Margin"). It was
-     written 2026-08-05 but, like `magic-link.html`, the file is only a tracked copy — until
-     it's pasted in, the first person you approve gets Supabase's stock unbranded email, and
-     *then* every later sign-in gets the nice branded one. Backwards from what you want, since
-     the first impression is the one that decides whether they trust the link at all.
-  2. **`https://debashis9.github.io/vocab_capture/` must be in Authentication → URL
-     Configuration → Redirect URLs**, since that's the `redirectTo` the Edge Function sends.
-     If it isn't an exact match, GoTrue silently falls back to Site URL — the exact failure
-     that sent sign-ins to a dead localhost address in July.
+- **The onboarding queue is tested end to end and works.** Done 2026-08-05, both email
+  templates are pasted into the dashboard, and `http://localhost:8000` was added to the
+  Redirect URLs alongside the production one so local testing can sign in. **Invite emails go
+  to Gmail's spam folder**, which cost half an hour of debugging before it turned out to be
+  nothing: the auth log showed `POST /invite → 200` with a ~3.8s duration (a real SMTP
+  handshake) and `confirmation_sent_at` was set, so everything up to Gmail's own filter was
+  working. Nothing to fix in code — the mail is DKIM-signed by Gmail, it's reputation and
+  content, not authentication. Two things follow from it:
+  - **Tell people to check spam** in the same WhatsApp message as the link. That's the whole
+    mitigation, and it's free given every invite is personally sent anyway. `guide.html` now
+    says it too, along with the fact that marking one "Not spam" fixes it for good.
+  - The other thing seen during that debugging, worth not re-deriving: **a copy of every
+    invite appears in debashis9@gmail.com's own mailbox**. That's the Gmail Sent copy, because
+    Supabase's SMTP authenticates as that account — not a misrouted email. Check the To: line
+    before concluding anything from it.
 - **Not built yet, deliberately deferred:** admin notification (email via Resend, or Telegram)
   and invite codes that skip the queue for people you messaged directly. Both were discussed
   and parked to keep this round to one thing.
