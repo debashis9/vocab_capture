@@ -705,6 +705,20 @@
     .auth-note { margin: 20px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
     .auth-status { margin: 16px 0 0; color: var(--ink-soft); font-size: 14px; }
     .auth-status.error { color: var(--oxblood); }
+    /* Three stacked fields and a button, rather than the sign-in form's single
+       row -- same .auth-form base so the inputs keep their styling. */
+    .request-form { flex-direction: column; }
+    .request-form button { padding: 12px 20px; }
+    .auth-switch { margin: 16px 0 0; }
+    /* A button, because it acts on this page rather than going anywhere, but
+       it should read as a quiet link and not as a second call to action. */
+    .linkish {
+      background: none; border: none; padding: 0;
+      color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 500;
+      text-decoration: underline; text-underline-offset: 3px;
+    }
+    .linkish:hover { background: none; color: var(--oxblood); }
+    .linkish[hidden] { display: none; }
 
     /* In the masthead corner beside the theme toggle. The signed-in email
        used to sit next to it, but it only ever restated something you
@@ -727,11 +741,33 @@
       padding: 26px 24px;
     }
     .admin-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 22px; margin: 0 0 18px; }
-    .admin-head {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; margin: 0 0 18px;
+    /* The way out of the admin route. Its own row above the cards rather than
+       inside one, since there are two cards now and it belongs to neither. */
+    .admin-topbar { display: flex; justify-content: flex-end; margin: 0 0 14px; }
+    .admin-card + .admin-card { margin-top: 20px; }
+
+    /* ---- Admin: the pending-request queue ---- */
+    .admin-count {
+      display: inline-block; margin-left: 8px; vertical-align: middle;
+      background: var(--oxblood); color: var(--on-oxblood);
+      font-family: "Inter", system-ui, sans-serif;
+      font-size: 12px; font-weight: 700; line-height: 1;
+      padding: 5px 9px; border-radius: 999px;
     }
-    .admin-head .admin-title { margin: 0; }
+    .admin-req-name { font-weight: 600; }
+    .admin-req-note { font-style: italic; }
+    .admin-req-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+    .admin-approve { padding: 7px 16px; font-size: 13px; }
+    .admin-approve-all { width: 100%; margin-top: 18px; padding: 12px 20px; }
+    .admin-req-ignored { margin-top: 18px; }
+    .admin-req-ignored summary {
+      color: var(--ink-soft); font-size: 13px; cursor: pointer; padding: 4px 0;
+    }
+    .admin-req-ignored .admin-email-row { opacity: 0.55; }
+    /* The pending card's own status line, so an approve result doesn't have to
+       borrow the invite list's. */
+    .admin-req-status { margin: 14px 0 0; color: var(--ink-soft); font-size: 14px; }
+    .admin-req-status.error { color: var(--oxblood); }
     .admin-add-form { display: flex; gap: 10px; }
     .admin-add-form input {
       flex: 1; min-width: 0;
@@ -766,6 +802,14 @@
 
     /* ---- Narrow screens (phones) ---- */
     @media (max-width: 520px) {
+      /* Same squeeze as the rows below, one screen over: name, email, note and
+         two buttons on one phone-width line left the email clipped mid-domain.
+         The details get the full line, the buttons drop to the next one. */
+      .admin-req-row { flex-wrap: wrap; }
+      .admin-req-row .admin-req-actions { width: 100%; justify-content: flex-end; margin-top: 6px; }
+      /* An email address has no spaces to break at, so without this it just
+         overflows its column instead of wrapping. */
+      .admin-req-row .admin-email-meta { overflow-wrap: anywhere; }
       /* "Reading" and the library quick-pick share the first line, the text
          input gets the whole second line. On a phone there simply isn't room
          for label + input + dropdown side by side without the input being
@@ -823,13 +867,34 @@
     <!-- Signed-out state: only this shows. Signed-in state: only #app-content shows. -->
     <section id="auth-section" class="auth-section" hidden>
       <div class="auth-card">
-        <h2 class="auth-title">Sign in to Margin</h2>
-        <p class="auth-lede">We'll email you a link — no password to remember.</p>
+        <h2 id="auth-title" class="auth-title">Sign in to Margin</h2>
+        <p id="auth-lede" class="auth-lede">We'll email you a link — no password to remember.</p>
         <form id="auth-form" class="auth-form">
           <input id="auth-email" type="email" placeholder="you@example.com" autocomplete="email" required />
           <button type="submit">Send me a link</button>
         </form>
+        <!-- The other half of this card. Someone arriving from a forwarded
+             link has no account and can't make one, so a plain "sign in" box
+             is a dead end for them; this is how they get into the queue. The
+             name field is the point of it -- an unfamiliar address on its own
+             isn't something the admin can act on. -->
+        <form id="request-form" class="auth-form request-form" hidden>
+          <!-- maxlength mirrors the caps request_access() enforces. The server
+               side is the one that counts; these just stop someone hitting a
+               rejection they had no way to see coming. -->
+          <input id="request-email" type="email" placeholder="you@example.com" autocomplete="email" maxlength="254" required />
+          <input id="request-name" type="text" placeholder="Your name" autocomplete="name" maxlength="80" required />
+          <input id="request-note" type="text" placeholder="How do we know each other? (optional)" maxlength="280" />
+          <button type="submit">Ask for access</button>
+        </form>
         <p id="auth-status" class="auth-status" hidden></p>
+        <!-- Always available, not only after a failed sign-in: the automatic
+             hand-off below keys off Supabase's error code, and this is the
+             path that still works if they ever reword or renumber it. -->
+        <p class="auth-switch">
+          <button type="button" id="show-request" class="linkish">New here? Ask for access</button>
+          <button type="button" id="show-signin" class="linkish" hidden>Back to sign in</button>
+        </p>
         <!-- What used to be a permanent footnote on the signed-in page. It's
              only news to someone who hasn't used Margin yet, so it lives
              here, where that person is. -->
@@ -990,6 +1055,7 @@
       // else signed in never sees it (and gets nothing from the hash anyway --
       // the RLS policies on allowed_emails/access_requests are the boundary).
       $("admin-link").hidden = session.user.id !== ADMIN_USER_ID;
+      refreshAdminBadge();
       // Saved words are per-account now, so (re)load them the moment we know
       // who's signed in — on initial load and again after a fresh sign-in.
       refreshSavedList();
@@ -1043,12 +1109,121 @@
       btn.textContent = "Send me a link";
       status.hidden = false;
       if (error) {
+        if (isNoAccountError(error)) {
+          // Not a failure the person can do anything about: it means they've
+          // never been invited. Hand them to the request form with what they
+          // already typed, rather than showing them Supabase's wording for it.
+          showRequestMode(email);
+          status.className = "auth-status";
+          // Says what happened, not what to do next: this line renders *under*
+          // the form, so pointing anywhere ("ask below") reads wrong. The lede
+          // above the fields is what gives the instruction.
+          status.textContent = `${email} isn't on the invite list yet.`;
+          status.hidden = false;
+          return;
+        }
         status.className = "auth-status error";
         status.textContent = "Something went wrong: " + error.message;
       } else {
         status.className = "auth-status";
         status.textContent = `Check your inbox — we sent a sign-in link to ${email}.`;
       }
+    });
+
+    // ---------- asking for access (the other half of the sign-in card) ------
+
+    // Supabase's shape for "shouldCreateUser is false and there's no such
+    // user": 400 / otp_disabled / "Signups not allowed for otp". Matched on
+    // the code first and the wording only as a fallback, since the wording is
+    // theirs to change whenever they like. Getting this wrong costs a nicety,
+    // not access -- the "Ask for access" link sits on the card either way.
+    function isNoAccountError(error) {
+      const code = String(error.code || "").toLowerCase();
+      const msg = String(error.message || "").toLowerCase();
+      return code === "otp_disabled"
+          || code === "signup_disabled"
+          || code === "user_not_found"
+          || msg.includes("signups not allowed")
+          || msg.includes("not allowed for otp")
+          || msg.includes("user not found");
+    }
+
+    function showRequestMode(prefillEmail) {
+      $("auth-title").textContent = "Ask for access";
+      $("auth-lede").textContent = "Margin is invite-only. Leave your details and you'll get an email once you're added.";
+      $("auth-form").hidden = true;
+      $("request-form").hidden = false;
+      $("show-request").hidden = true;
+      $("show-signin").hidden = false;
+      if (prefillEmail) $("request-email").value = prefillEmail;
+      $("request-name").focus();
+    }
+
+    function showSignInMode() {
+      $("auth-title").textContent = "Sign in to Margin";
+      $("auth-lede").textContent = "We'll email you a link — no password to remember.";
+      $("auth-form").hidden = false;
+      $("request-form").hidden = true;
+      $("show-request").hidden = false;
+      $("show-signin").hidden = true;
+      $("auth-status").hidden = true;
+    }
+
+    $("show-request").addEventListener("click", () => {
+      // Carry over whatever they'd already typed in the sign-in box, so
+      // switching modes never costs them a retype.
+      showRequestMode($("auth-email").value.trim());
+      $("auth-status").hidden = true;
+    });
+
+    $("show-signin").addEventListener("click", showSignInMode);
+
+    $("request-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = $("request-email").value.trim();
+      if (!email) return;
+
+      const btn = e.target.querySelector("button");
+      const status = $("auth-status");
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+
+      // One RPC rather than a table insert: access_requests has no insert
+      // policy for anon at all, so this SECURITY DEFINER function is the only
+      // way in, and the validation and rate limit live inside it where a
+      // caller can't skip them. See supabase/sql/access-requests.sql.
+      const { data, error } = await sb.rpc("request_access", {
+        p_email: email,
+        p_name: $("request-name").value.trim(),
+        p_note: $("request-note").value.trim(),
+      });
+
+      btn.disabled = false;
+      btn.textContent = "Ask for access";
+      status.hidden = false;
+
+      if (error) {
+        status.className = "auth-status error";
+        status.textContent = "Couldn't send that: " + error.message;
+        return;
+      }
+      if (data === "invalid") {
+        status.className = "auth-status error";
+        status.textContent = "That doesn't look like an email address.";
+        return;
+      }
+      if (data === "rate_limited") {
+        status.className = "auth-status error";
+        status.textContent = "Too many requests just now — try again in a little while.";
+        return;
+      }
+
+      // 'received' — the only other thing request_access returns, and it means
+      // the same thing whether they're newly queued, asking again, or already
+      // on the list. See the SQL for why it's deliberately not more specific.
+      status.className = "auth-status";
+      status.textContent = "Got it. You'll get an email from Margin once you're added.";
+      $("request-form").hidden = true;
     });
 
     $("sign-out").addEventListener("click", () => sb.auth.signOut());
@@ -3518,39 +3693,113 @@
 
     $("admin-link").addEventListener("click", () => { location.hash = "#admin"; });
 
+    // A queue nobody looks at is no better than no queue, and there's no
+    // notification channel yet — so the button carries the count itself. Safe
+    // to call for anyone: the RLS select policy means a non-admin's count comes
+    // back 0 regardless, and the button they'd be counting for is hidden anyway.
+    async function refreshAdminBadge() {
+      if ($("admin-link").hidden) return;
+      const { count, error } = await sb.from("access_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      $("admin-link").textContent = (!error && count) ? `Admin · ${count}` : "Admin";
+    }
+
     function formatDateTime(iso) {
       return new Date(iso).toLocaleString(undefined, {
         month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
       });
     }
 
-    async function renderAdminList(adminEmail) {
-      $("admin-section").innerHTML = `<p class="status">Loading…</p>`;
-      // Active rows (deleted_at is null) first, deleted ones after — within
-      // each group, oldest addition first so the serial numbers read as a
-      // stable running log rather than reshuffling on every reload.
-      const { data, error } = await sb.from("allowed_emails")
-        .select("email, added_at, deleted_at")
-        .order("deleted_at", { ascending: true, nullsFirst: true })
-        .order("added_at", { ascending: true });
-      if (error) {
-        $("admin-section").innerHTML = `<p class="status error">Couldn't load the invite list: ${escapeHtml(error.message)}</p>`;
-        return;
-      }
+    // "asked 2 days ago" reads as a nudge in a way a timestamp doesn't. Past a
+    // week it stops being useful, so fall back to the absolute date.
+    function formatRelative(iso) {
+      const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+      if (mins < 1) return "just now";
+      if (mins < 60) return `${mins} min ago`;
+      const hours = Math.round(mins / 60);
+      if (hours < 24) return `${hours} hr ago`;
+      const days = Math.round(hours / 24);
+      if (days <= 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+      return formatDateTime(iso);
+    }
 
-      $("admin-section").innerHTML = `
+    // Approving and ignoring both re-render the whole admin page, which would
+    // otherwise wipe the result message in the same tick it appeared. Parked
+    // here, shown once by renderAdminList, then cleared.
+    let adminNotice = null;
+
+    // Approve is not a table write from here, unlike every other action on this
+    // page. See the header comment in supabase/functions/approve-access/index.ts
+    // for why it can't be: creating the person's auth.users row needs the
+    // service-role key, and that key must never reach this file.
+    const APPROVE_ENDPOINT = SUPABASE_URL + "/functions/v1/approve-access";
+
+    function renderRequestRow(row, withActions) {
+      const meta = [
+        row.note ? `<span class="admin-req-note">“${escapeHtml(row.note)}”</span>` : "",
+        `asked ${formatRelative(row.last_requested_at)}`,
+        row.request_count > 1 ? `${row.request_count} times` : "",
+      ].filter(Boolean).join(" · ");
+      return `
+        <li class="admin-email-row admin-req-row">
+          <span class="admin-email-info">
+            <span class="admin-email-addr admin-req-name">${escapeHtml(row.display_name || row.email)}</span>
+            ${row.display_name ? `<span class="admin-email-meta">${escapeHtml(row.email)}</span>` : ""}
+            <span class="admin-email-meta">${meta}</span>
+          </span>
+          ${withActions ? `
+          <span class="admin-req-actions">
+            <button type="button" class="admin-approve" data-id="${row.id}">Approve</button>
+            <button type="button" class="saved-delete admin-ignore" data-id="${row.id}">Ignore</button>
+          </span>` : ""}
+        </li>`;
+    }
+
+    function renderPendingCard(pending, ignored, loadError) {
+      if (loadError) {
+        return `
+          <div class="admin-card">
+            <h2 class="admin-title">Waiting for you</h2>
+            <p class="admin-req-status error">Couldn't load requests: ${escapeHtml(loadError.message)}</p>
+            <p class="admin-empty">If supabase/sql/access-requests.sql hasn't been run against this project yet, that's why.</p>
+          </div>`;
+      }
+      // Nothing pending, nothing ignored, nothing to report: don't render a
+      // card whose only content is that it's empty.
+      if (!pending.length && !ignored.length && !adminNotice) return "";
+
+      return `
         <div class="admin-card">
-          <div class="admin-head">
-            <h2 class="admin-title">Invite list</h2>
-            <button type="button" class="btn-signout admin-back">Back to Margin</button>
-          </div>
+          <h2 class="admin-title">Waiting for you${
+            pending.length ? `<span class="admin-count">${pending.length}</span>` : ""
+          }</h2>
+          ${pending.length ? `
+            <ul class="admin-email-list">${pending.map((r) => renderRequestRow(r, true)).join("")}</ul>
+            ${pending.length > 1
+              ? `<button type="button" id="admin-approve-all" class="admin-approve-all">Approve all ${pending.length}</button>`
+              : ""}`
+            : `<p class="admin-empty">Nothing waiting.</p>`}
+          <p id="admin-req-status" class="admin-req-status" hidden></p>
+          ${ignored.length ? `
+            <details class="admin-req-ignored">
+              <summary>Previously ignored (${ignored.length})</summary>
+              <ul class="admin-email-list">${ignored.map((r) => renderRequestRow(r, false)).join("")}</ul>
+            </details>` : ""}
+        </div>`;
+    }
+
+    function renderInviteCard(rows, adminEmail) {
+      return `
+        <div class="admin-card">
+          <h2 class="admin-title">Invite list</h2>
           <form id="admin-add-form" class="admin-add-form">
             <input id="admin-add-email" type="email" placeholder="email@example.com" required />
             <button type="submit">Add</button>
           </form>
           <p id="admin-status" class="auth-status error" hidden></p>
           <ul class="admin-email-list">
-            ${data.length ? data.map((row, i) => {
+            ${rows.length ? rows.map((row, i) => {
               const isDeleted = !!row.deleted_at;
               const isSelf = row.email.toLowerCase() === adminEmail.toLowerCase();
               return `
@@ -3571,8 +3820,60 @@
             }).join("") : `<li class="admin-empty">No emails yet.</li>`}
           </ul>
         </div>`;
+    }
+
+    async function renderAdminList(adminEmail) {
+      $("admin-section").innerHTML = `<p class="status">Loading…</p>`;
+
+      // Both lists in one wait rather than two. They're independent on purpose:
+      // access_requests failing — most likely because access-requests.sql
+      // hasn't been run against this project yet — must not take the invite
+      // list down with it, since that half already worked before any of this.
+      //
+      // Invite list ordering unchanged: active rows (deleted_at is null) first,
+      // deleted ones after, oldest addition first within each group so the
+      // serial numbers read as a stable running log.
+      const [allowed, requests] = await Promise.all([
+        sb.from("allowed_emails")
+          .select("email, added_at, deleted_at")
+          .order("deleted_at", { ascending: true, nullsFirst: true })
+          .order("added_at", { ascending: true }),
+        sb.from("access_requests")
+          .select("id, email, display_name, note, status, requested_at, last_requested_at, request_count")
+          .order("last_requested_at", { ascending: false }),
+      ]);
+
+      if (allowed.error) {
+        $("admin-section").innerHTML = `<p class="status error">Couldn't load the invite list: ${escapeHtml(allowed.error.message)}</p>`;
+        return;
+      }
+
+      const reqRows = requests.error ? [] : (requests.data || []);
+      const pending = reqRows.filter((r) => r.status === "pending");
+      const ignored = reqRows.filter((r) => r.status === "denied");
+
+      $("admin-section").innerHTML = `
+        <div class="admin-topbar">
+          <button type="button" class="btn-signout admin-back">Back to Margin</button>
+        </div>
+        ${renderPendingCard(pending, ignored, requests.error)}
+        ${renderInviteCard(allowed.data, adminEmail)}`;
+
+      // Whatever the last approve/ignore had to say, now that there's somewhere
+      // to say it. Cleared immediately so it shows once and not on every
+      // subsequent reload of the page.
+      if (adminNotice && $("admin-req-status")) {
+        const el = $("admin-req-status");
+        el.hidden = false;
+        el.className = "admin-req-status" + (adminNotice.error ? " error" : "");
+        el.textContent = adminNotice.text;
+      }
+      adminNotice = null;
 
       wireAdminBack();
+      wirePendingCard(adminEmail, pending);
+      // Keeps the masthead count honest after an approve or ignore.
+      refreshAdminBadge();
 
       $("admin-add-form").addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -3611,6 +3912,105 @@
           renderAdminList(adminEmail);
         });
       });
+    }
+
+    function wirePendingCard(adminEmail, pending) {
+      const approveAll = $("admin-approve-all");
+      if (approveAll) {
+        approveAll.addEventListener("click", () => {
+          // Worth a confirm: this one sends real email to real people, and
+          // there's no unsend.
+          if (!confirm(`Approve all ${pending.length}? Each one gets an email inviting them in.`)) return;
+          approveRequests(pending.map((r) => r.id), adminEmail);
+        });
+      }
+      $("admin-section").querySelectorAll(".admin-approve").forEach((btn) => {
+        btn.addEventListener("click", () => approveRequests([Number(btn.dataset.id)], adminEmail));
+      });
+      $("admin-section").querySelectorAll(".admin-ignore").forEach((btn) => {
+        btn.addEventListener("click", () => ignoreRequest(Number(btn.dataset.id), adminEmail));
+      });
+    }
+
+    async function approveRequests(ids, adminEmail) {
+      const status = $("admin-req-status");
+      status.hidden = false;
+      status.className = "admin-req-status";
+      status.textContent = ids.length > 1 ? `Inviting ${ids.length} people…` : "Inviting…";
+      // Every button in the card, not just the one clicked: an approve is a
+      // few seconds of round trips, and a second click during that window
+      // would fire a duplicate invite.
+      $("admin-section").querySelectorAll(".admin-approve, .admin-ignore, #admin-approve-all")
+        .forEach((b) => { b.disabled = true; });
+
+      try {
+        // Read the token fresh rather than reusing currentSession's: this page
+        // can sit open long enough for that one to have been refreshed
+        // underneath it.
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) throw new Error("Signed out — sign in again.");
+
+        const res = await fetch(APPROVE_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: "Bearer " + session.access_token,
+          },
+          body: JSON.stringify({ ids }),
+        });
+
+        // A platform-level rejection (bad JWT, function not deployed) comes
+        // back as HTML or a bare string, not our JSON shape.
+        let body = null;
+        try { body = await res.json(); } catch { /* handled below */ }
+
+        if (!res.ok) {
+          throw new Error((body && (body.error || body.message)) || `${res.status} ${res.statusText}`);
+        }
+
+        const results = (body && body.results) || [];
+        const failed = results.filter((r) => !r.ok);
+        const okCount = results.length - failed.length;
+
+        if (failed.length) {
+          adminNotice = {
+            error: true,
+            text: `${okCount} invited. Couldn't invite: ` +
+                  failed.map((r) => `${r.email} (${r.error})`).join("; "),
+          };
+        } else {
+          // "invited: false" means they already had an account, so no mail was
+          // sent -- worth saying, since otherwise you'd wait for a reply to an
+          // email that never went out.
+          const noMail = results.filter((r) => r.invited === false).length;
+          adminNotice = {
+            error: false,
+            text: okCount === 1
+              ? `Invited ${results[0].email}.${noMail ? " (Already had an account, so no email was sent — they can just sign in.)" : ""}`
+              : `Invited ${okCount} people.${noMail ? ` ${noMail} already had an account, so no email went to them.` : ""}`,
+          };
+        }
+      } catch (err) {
+        adminNotice = { error: true, text: "Couldn't approve: " + err.message };
+      }
+
+      renderAdminList(adminEmail);
+    }
+
+    async function ignoreRequest(id, adminEmail) {
+      // Plain table update -- unlike approve, ignoring needs no elevated
+      // privileges and nothing leaves the database. The requester is told
+      // nothing either way (see access-requests.sql for why).
+      const { error } = await sb.from("access_requests")
+        .update({
+          status: "denied",
+          decided_at: new Date().toISOString(),
+          decided_by: ADMIN_USER_ID,
+        })
+        .eq("id", id);
+      if (error) adminNotice = { error: true, text: "Couldn't ignore that: " + error.message };
+      renderAdminList(adminEmail);
     }
 
     window.addEventListener("hashchange", () => checkAdminRoute(currentSession));
