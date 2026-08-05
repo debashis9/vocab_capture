@@ -499,8 +499,93 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
     the context needs `serviceWorkers: "block"`, or on the second load `sw.js` serves its cached
     copy of the Supabase SDK and the route-based stub silently stops applying.
 
+- **Self-serve onboarding: an access-request queue, built 2026-08-05 on branch
+  `onboarding-approval-flow`. Code complete, database and Edge Function live, NOT yet tested
+  end to end with a real person.** This closes a gap that had been there since the invite list
+  was built: `allowed_emails` is *not* a login list, it's a permission check the
+  `before insert on auth.users` trigger consults **at the moment an account is created**.
+  Adding an email on `#admin` therefore granted permission for an account that nothing in the
+  app could create — `signInWithOtp` uses `shouldCreateUser: false`, so the person still got
+  nothing until "Add user" was done by hand in the Supabase dashboard. Confirmed live against
+  the real database on 2026-08-05: an email not on the list is blocked with "signup rejected",
+  the same email succeeds once the list entry exists first, and a soft-deleted entry is blocked
+  again. That ordering is load-bearing, and it's why approving happens where it does.
+  - **The stranger's side.** The sign-in card has a second mode. A failed sign-in that looks
+    like "no such account" (`otp_disabled` and friends — matched on error code first, wording
+    only as a fallback) hands them to a request form with the email they already typed, asking
+    for a name and an optional "how do we know each other?". A permanently visible "New here?
+    Ask for access" link does the same thing, deliberately, so the flow doesn't depend on
+    Supabase never rewording an error string.
+  - **`public.access_requests` + `request_access()`** (`supabase/sql/access-requests.sql`,
+    applied 2026-08-05). The table has admin-only select/update policies and **no insert policy
+    at all** — the only write path is the SECURITY DEFINER function, which normalizes the
+    email, validates it, collapses repeat asks into one row with a `request_count`, and caps
+    new rows at 20/hour. Verified as the `anon` role: writes land, and `select count(*)` on the
+    same table comes back 0. **A vibesec pass on 2026-08-05 tightened three things in it**, all
+    re-verified live: the email pattern is now a character allowlist rather than
+    "anything without an @ or a space" (so `<`, `>` and quotes can't reach the column at all —
+    belt and braces, since the admin page escapes all three fields on render anyway); length
+    caps of 254/80/280 on email/name/note, mirrored as `maxlength` on the form, because an
+    anon-callable function with no ceiling lets one caller park megabytes in the table; and the
+    repeat path now bumps at most once a minute, since the 20/hour limit only ever counted
+    *new* rows and left repeat asks as an unmetered write. The function answers a flat `'received'` for pending, repeat,
+    already-invited and previously-ignored alike, so it can't be used to probe who's a Margin
+    user, and ignoring someone stays quiet rather than becoming an announcement.
+  - **Approving is an Edge Function, not a table write** (`supabase/functions/approve-access/`,
+    deployed 2026-08-05). It's the only way to do the half the browser can't: create the
+    `auth.users` row and mail the person. It re-reads emails from the table by id (never trusts
+    an email in the request body), upserts `allowed_emails` **then** calls
+    `inviteUserByEmail` — that order, per the trigger above — and marks the row approved.
+    Already-registered is treated as success, not failure. Approvals run sequentially because
+    the project's Gmail SMTP is rate-limited and a parallel "Approve all" is the reliable way
+    to trip it. **Its authorization check is its own**, comparing `getUser(token).id` against
+    `ADMIN_USER_ID`: the platform's `verify_jwt` only proves the caller sent *a* valid project
+    key, and the anon key is both valid and public. Verified live — a call bearing the anon key
+    gets 403, and CORS omits the allow-origin header entirely for an unknown origin rather than
+    falling back to `*` (the same fail-closed rule the Worker learned).
+  - **`#admin` now has a "Waiting for you" card** above the invite list, with per-row Approve
+    and Ignore, an "Approve all" behind a confirm (it sends real email), and previously-ignored
+    requests folded into a `<details>`. The two lists load in parallel and are independent: if
+    `access_requests` fails to load, the invite list still renders, since that half worked
+    before any of this existed.
+- **The `#admin` route has a way in and a way out, 2026-08-05.** An Admin button sits in the
+  masthead beside Sign out, rendered only when the signed-in id matches `ADMIN_USER_ID`, and
+  carrying the pending count in its label (`Admin · 3`) since there's no notification channel
+  yet. This changes nothing about security — the hash was never a secret and RLS is the
+  boundary — it just makes the route reachable from a phone. Two supporting moves:
+  `ADMIN_USER_ID` moved up next to the Supabase client (`showSignedIn` reads it, and left
+  further down it would sit in its temporal dead zone), and `checkAdminRoute()` learned to
+  restore the normal screen when the hash *isn't* `#admin` — until there was a Back button,
+  the only way off the route was a reload, so that path had never run.
+
 ## Picking up next session
-- **Everything is merged to `main` and pushed.** The three parked features (offline mode, OCR,
+- **Branch `onboarding-approval-flow` is the live work.** Not merged, not pushed. `main` is
+  otherwise still where everything else landed.
+- **The onboarding queue needs one real end-to-end run before it can be called done.** The
+  database side and the authorization side are verified live (see Current state); what is *not*
+  tested is the part that sends actual email — approving a real request and having a real
+  person receive an invite and get in. Test it with one address you control before letting
+  anyone else near it. Two things to check while doing it:
+  1. **Supabase's "Invite user" email template has never been customized.** Only the Magic Link
+     template was redone (`supabase/email-templates/magic-link.html`) — deliberately, because
+     at the time the invite flow didn't use it. It does now, so the first invited person gets
+     Supabase's stock, unbranded email. Worth giving it the same treatment.
+  2. **`https://debashis9.github.io/vocab_capture/` must be in Authentication → URL
+     Configuration → Redirect URLs**, since that's the `redirectTo` the Edge Function sends.
+     If it isn't an exact match, GoTrue silently falls back to Site URL — the exact failure
+     that sent sign-ins to a dead localhost address in July.
+- **Not built yet, deliberately deferred:** admin notification (email via Resend, or Telegram)
+  and invite codes that skip the queue for people you messaged directly. Both were discussed
+  and parked to keep this round to one thing.
+- **Known, not urgent: "Delete" on the invite list does not revoke anyone who has already
+  signed in.** `check_allowed_email()` is a `before insert on auth.users` trigger, so it never
+  runs again for an existing account — a soft-deleted email keeps working indefinitely. The
+  2026-07-31 note claiming Delete is "a real revocation" is only true for someone who never had
+  an account. Confirmed 2026-08-05 that no live user is currently in that state (both accounts
+  are on the list, neither deleted), so nothing is leaking today. The fix belongs in
+  `approve-access` (ban or delete the `auth.users` row on revoke), which already holds the
+  service-role key.
+- **Everything else is merged to `main` and pushed.** The three parked features (offline mode, OCR,
   book library) all landed on `main`; `future/ocr-offline-library` is now a leftover branch, not
   where work happens.
 - **The 2026-08-04 declutter round is on `main` but has NOT been looked at on a real phone yet**
@@ -516,8 +601,10 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   1. **Done 2026-08-04:** `supabase/sql/books-table.sql` is run, a real book was scanned in
      successfully, and the Library screen renders correctly against the real table — book
      scanning/library is fully verified, nothing left to check there.
-  2. `sw.js` is at `v39`. The Worker (`worker/src/index.js`) is deployed live and matches what's
-     committed — no pending redeploy.
+  2. `sw.js` is at `v40` (bumped 2026-08-05 for the onboarding round). The Worker
+     (`worker/src/index.js`) is deployed live and matches what's committed — no pending
+     redeploy. The `approve-access` Edge Function is deployed and matches
+     `supabase/functions/approve-access/index.ts`.
   3. Decide whether to test OCR on a real Android phone (optional — "Choose a photo" with a
      phone-taken picture has already fully exercised OCR recognition/crop/streaming; only the
      live-camera-specific UX, getUserMedia permission prompt and viewfinder, remains untested,
