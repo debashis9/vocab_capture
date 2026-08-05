@@ -619,9 +619,39 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
     invite appears in debashis9@gmail.com's own mailbox**. That's the Gmail Sent copy, because
     Supabase's SMTP authenticates as that account — not a misrouted email. Check the To: line
     before concluding anything from it.
-- **Not built yet, deliberately deferred:** admin notification (email via Resend, or Telegram)
-  and invite codes that skip the queue for people you messaged directly. Both were discussed
-  and parked to keep this round to one thing.
+- **Invite codes are built, 2026-08-05 — the queue is now the fallback, not the main path.**
+  `.../?i=fam2026` lets someone in without waiting: they put their email in, the code is
+  checked, their account is created and the sign-in link goes out in one round trip. Chosen
+  over building an admin notification channel, and the reasoning is worth keeping: a
+  notification makes the admin a *faster* bottleneck, a code removes the admin from the path
+  entirely. Notifications also have a failure mode that a code doesn't — a webhook that quietly
+  breaks looks exactly like "no requests", so you stop checking the badge and end up slower
+  than before you built it.
+  - `public.invite_codes` + `claim_invite_code()` (`supabase/sql/invite-codes.sql`, applied).
+    Per-code: the code string, a label, `max_uses` (null = unlimited) and `expires_at`
+    (null = never), all editable from `#admin`, plus a `disabled_at` off switch. `SELECT … FOR
+    UPDATE` is what makes `max_uses` a real cap — without the row lock, two people redeeming
+    the last use simultaneously would both get in.
+  - **Every rejection answers the same `invalid_code`** — expired, disabled, used up and
+    nonexistent are indistinguishable, so the endpoint can't be used to hunt for valid codes by
+    comparing responses. An email already on the list returns `already_allowed` *without*
+    spending a use.
+  - `redeem-invite` Edge Function (deployed). Public by design — the code is the credential,
+    so there's no admin check. What stands in for one: the code's own limits, plus a 30/hour
+    ceiling across all codes inside `claim_invite_code`, which is what stops a leaked unlimited
+    code becoming a mail relay sending from debashis9@gmail.com. It also self-heals: it
+    attempts the invite on `already_allowed` too, so someone stranded on the invite list by a
+    failed send (on the list, no `auth.users` row, and `shouldCreateUser:false` means they
+    can't make one) gets in by simply redeeming again.
+  - The code lives in the **query string**, not the hash — `#admin` is there, and Supabase puts
+    the access token there on the way back from a magic link, so a code parked in the hash
+    would be clobbered.
+  - A dead code is never a dead end: the visitor drops into the ordinary request form with a
+    message. Redemptions are logged into `access_requests` with `via_code` set, so the admin
+    page shows how each person actually arrived.
+- **Still not built, deliberately:** the admin notification channel. If it's ever wanted,
+  Telegram over email — one `fetch`, no domain, no verification, and it can't be spam-filtered
+  the way Margin's own mail already is.
 - **Known, not urgent: "Delete" on the invite list does not revoke anyone who has already
   signed in.** `check_allowed_email()` is a `before insert on auth.users` trigger, so it never
   runs again for an existing account — a soft-deleted email keeps working indefinitely. The

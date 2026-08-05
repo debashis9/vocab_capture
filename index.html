@@ -709,6 +709,9 @@
        row -- same .auth-form base so the inputs keep their styling. */
     .request-form { flex-direction: column; }
     .request-form button { padding: 12px 20px; }
+    /* Invite mode hides the "how do we know each other?" field, and a flex
+       child needs telling -- [hidden] alone loses to the flex layout. */
+    .request-form input[hidden] { display: none; }
     .auth-switch { margin: 16px 0 0; }
     /* A button, because it acts on this page rather than going anywhere, but
        it should read as a quiet link and not as a second call to action. */
@@ -766,8 +769,37 @@
     .admin-req-ignored .admin-email-row { opacity: 0.55; }
     /* The pending card's own status line, so an approve result doesn't have to
        borrow the invite list's. */
-    .admin-req-status { margin: 14px 0 0; color: var(--ink-soft); font-size: 14px; }
+    .admin-req-status { margin: 14px 0 0; color: var(--ink-soft); font-size: 14px; word-break: break-all; }
     .admin-req-status.error { color: var(--oxblood); }
+
+    /* ---- Admin: invite links ---- */
+    .admin-lede { color: var(--ink-soft); font-size: 14px; margin: -8px 0 18px; line-height: 1.5; }
+    .code-add-form { display: flex; flex-direction: column; gap: 10px; }
+    .code-add-form input, .code-add-form select {
+      font: inherit; font-size: 16px; width: 100%; min-width: 0;
+      background: var(--paper-2);
+      border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 12px 14px; color: var(--ink);
+    }
+    .code-add-form input:focus, .code-add-form select:focus {
+      outline: 2px solid var(--oxblood); outline-offset: 1px; border-color: transparent;
+    }
+    .code-add-form button { padding: 12px 20px; }
+    .code-add-row { display: flex; gap: 10px; }
+    .code-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .code-field > span { font-size: 12px; color: var(--ink-soft); }
+    .code-chip {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: var(--paper-2); border-radius: 6px; padding: 1px 6px;
+    }
+    /* Outlined, not filled: "Create invite link" is the one primary action on
+       this card, and a solid button on every row competes with it. */
+    .code-copy {
+      padding: 6px 14px; font-size: 13px; font-weight: 500;
+      background: transparent; color: var(--ink-soft);
+      border: 1.5px solid var(--line);
+    }
+    .code-copy:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
     .admin-add-form { display: flex; gap: 10px; }
     .admin-add-form input {
       flex: 1; min-width: 0;
@@ -885,7 +917,7 @@
           <input id="request-email" type="email" placeholder="you@example.com" autocomplete="email" maxlength="254" required />
           <input id="request-name" type="text" placeholder="Your name" autocomplete="name" maxlength="80" required />
           <input id="request-note" type="text" placeholder="How do we know each other? (optional)" maxlength="280" />
-          <button type="submit">Ask for access</button>
+          <button id="request-submit" type="submit">Ask for access</button>
         </form>
         <p id="auth-status" class="auth-status" hidden></p>
         <!-- Always available, not only after a failed sign-in: the automatic
@@ -1153,6 +1185,11 @@
       $("auth-lede").textContent = "Margin is invite-only. Leave your details and you'll get an email once you're added.";
       $("auth-form").hidden = true;
       $("request-form").hidden = false;
+      // Both restored explicitly: an expired invite code drops the visitor
+      // here from invite mode, which had hidden the note and relabelled the
+      // button.
+      $("request-note").hidden = false;
+      $("request-submit").textContent = "Ask for access";
       $("show-request").hidden = true;
       $("show-signin").hidden = false;
       if (prefillEmail) $("request-email").value = prefillEmail;
@@ -1164,9 +1201,85 @@
       $("auth-lede").textContent = "We'll email you a link — no password to remember.";
       $("auth-form").hidden = false;
       $("request-form").hidden = true;
+      $("request-note").hidden = false;
+      $("request-submit").textContent = "Ask for access";
       $("show-request").hidden = false;
       $("show-signin").hidden = true;
       $("auth-status").hidden = true;
+    }
+
+    // ---------- arriving with an invite code (?i=CODE) ------------------
+    // The whole point of a code is that nobody has to wait for the admin, so
+    // this path skips the queue entirely: the code is checked, the account is
+    // created, and the sign-in link goes out in one round trip.
+    const REDEEM_ENDPOINT = SUPABASE_URL + "/functions/v1/redeem-invite";
+
+    // Read once at load. It lives in the query string rather than the hash
+    // because the hash is where #admin lives and where Supabase puts the
+    // access token on the way back from a magic link -- a code parked there
+    // would get clobbered.
+    let inviteCode = (new URLSearchParams(location.search).get("i") || "").trim();
+
+    function showInviteMode() {
+      $("auth-title").textContent = "You've been invited";
+      $("auth-lede").textContent = "Put your email in and your sign-in link comes straight back — no waiting to be approved.";
+      $("auth-form").hidden = true;
+      $("request-form").hidden = false;
+      // No "how do we know each other?" here: whoever sent the code already
+      // knows, and the fewer fields between them and being in, the better.
+      $("request-note").hidden = true;
+      $("request-submit").textContent = "Get my sign-in link";
+      $("show-request").hidden = true;
+      $("show-signin").hidden = false;
+      $("request-email").focus();
+    }
+
+    async function redeemInviteCode(email, name, status, btn) {
+      const res = await fetch(REDEEM_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: "Bearer " + SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ code: inviteCode, email, name }),
+      });
+
+      let body = null;
+      try { body = await res.json(); } catch { /* handled below */ }
+      const result = (body && body.result) || "error";
+
+      if (result === "invited") {
+        status.className = "auth-status";
+        status.textContent = `Check your inbox — your sign-in link is on its way to ${email}. If it's not there in a minute, look in your spam folder.`;
+        $("request-form").hidden = true;
+        return;
+      }
+      if (result === "already_have_account") {
+        status.className = "auth-status";
+        status.textContent = "You already have an account — use “Send me a link” to sign in.";
+        showSignInMode();
+        $("auth-email").value = email;
+        status.hidden = false;
+        return;
+      }
+      if (result === "invalid_code") {
+        // Expired, disabled, used up or simply wrong — the server doesn't say
+        // which, so nor can we. Drop them into the ordinary request flow
+        // rather than leaving them at a dead end.
+        inviteCode = "";
+        showRequestMode(email);
+        status.className = "auth-status";
+        status.textContent = "That invite link has expired or been used up — ask below instead and I'll take a look.";
+        status.hidden = false;
+        return;
+      }
+      status.className = "auth-status error";
+      status.textContent = result === "invalid_email"
+        ? "That doesn't look like an email address."
+        : result === "rate_limited"
+        ? "Too many sign-ups just now — try again in a little while."
+        : "Something went wrong sending that. Try again in a minute.";
     }
 
     $("show-request").addEventListener("click", () => {
@@ -1176,17 +1289,48 @@
       $("auth-status").hidden = true;
     });
 
-    $("show-signin").addEventListener("click", showSignInMode);
+    $("show-signin").addEventListener("click", () => {
+      // Leaving invite mode by hand means they'd rather sign in — don't drag
+      // them back to the code on the next render.
+      inviteCode = "";
+      showSignInMode();
+    });
+
+    // Someone arriving on a code link sees the invite card, not the sign-in
+    // box. Safe to run unconditionally: if they turn out to be signed in
+    // already, showSignedIn hides this whole section anyway.
+    if (inviteCode) showInviteMode();
 
     $("request-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const email = $("request-email").value.trim();
       if (!email) return;
 
-      const btn = e.target.querySelector("button");
+      const btn = $("request-submit");
       const status = $("auth-status");
+      const label = btn.textContent;
       btn.disabled = true;
       btn.textContent = "Sending…";
+
+      // Same form, two destinations. With a code in hand there's nothing to
+      // queue -- redeeming does the whole job -- so only the codeless path
+      // goes near access_requests.
+      if (inviteCode) {
+        try {
+          await redeemInviteCode(email, $("request-name").value.trim(), status, btn);
+        } catch (err) {
+          status.className = "auth-status error";
+          status.textContent = "Couldn't reach Margin just now: " + err.message;
+        }
+        btn.disabled = false;
+        // Only put the old label back if nothing else claimed the button in
+        // the meantime. A dead code sends the visitor to showRequestMode(),
+        // which relabels it — restoring `label` unconditionally would undo
+        // that and leave "Get my sign-in link" on a form that now asks.
+        if (btn.textContent === "Sending…") btn.textContent = label;
+        status.hidden = false;
+        return;
+      }
 
       // One RPC rather than a table insert: access_requests has no insert
       // policy for anon at all, so this SECURITY DEFINER function is the only
@@ -1199,7 +1343,7 @@
       });
 
       btn.disabled = false;
-      btn.textContent = "Ask for access";
+      btn.textContent = label;
       status.hidden = false;
 
       if (error) {
@@ -3789,6 +3933,77 @@
         </div>`;
     }
 
+    // A suggestion only — the field is editable, and a code someone has to
+    // type off a WhatsApp message should be readable rather than random.
+    function suggestCode() {
+      const words = ["folio", "margin", "quill", "vellum", "inkwell", "paperback"];
+      return words[Math.floor(Math.random() * words.length)] + "-" +
+             Math.random().toString(36).slice(2, 6);
+    }
+
+    function codeStatus(row) {
+      if (row.disabled_at) return { label: "Off", spent: true };
+      if (row.expires_at && new Date(row.expires_at) <= new Date()) return { label: "Expired", spent: true };
+      if (row.max_uses != null && row.uses >= row.max_uses) return { label: "Used up", spent: true };
+      return { label: "Live", spent: false };
+    }
+
+    function inviteLinkFor(code) {
+      return location.origin + location.pathname + "?i=" + encodeURIComponent(code);
+    }
+
+    function renderCodesCard(codes) {
+      return `
+        <div class="admin-card">
+          <h2 class="admin-title">Invite links</h2>
+          <p class="admin-lede">A link that lets someone in without waiting for you. Send it in the same message as the app link.</p>
+          <form id="code-add-form" class="code-add-form">
+            <input id="code-value" type="text" placeholder="code" maxlength="40" required value="${escapeHtml(suggestCode())}" />
+            <input id="code-label" type="text" placeholder="Who's it for? (optional)" maxlength="60" />
+            <div class="code-add-row">
+              <label class="code-field">
+                <span>Max uses</span>
+                <input id="code-max" type="number" min="1" max="500" value="10" placeholder="blank = unlimited" />
+              </label>
+              <label class="code-field">
+                <span>Expires</span>
+                <select id="code-expiry">
+                  <option value="7">In 7 days</option>
+                  <option value="30" selected>In 30 days</option>
+                  <option value="90">In 90 days</option>
+                  <option value="">Never</option>
+                </select>
+              </label>
+            </div>
+            <button type="submit">Create invite link</button>
+          </form>
+          <p id="code-status" class="admin-req-status" hidden></p>
+          <ul class="admin-email-list">
+            ${codes.length ? codes.map((row) => {
+              const st = codeStatus(row);
+              return `
+              <li class="admin-email-row admin-req-row${st.spent ? " deleted" : ""}">
+                <span class="admin-email-info">
+                  <span class="admin-email-addr admin-req-name">${escapeHtml(row.label || row.code)}</span>
+                  <span class="admin-email-meta"><code class="code-chip">${escapeHtml(row.code)}</code> · ${st.label}</span>
+                  <span class="admin-email-meta">${
+                    row.max_uses == null ? `${row.uses} used · no limit` : `${row.uses} of ${row.max_uses} used`
+                  }${
+                    row.expires_at
+                      ? ` · ${new Date(row.expires_at) <= new Date() ? "expired" : "expires"} ${formatDateTime(row.expires_at)}`
+                      : " · never expires"
+                  }</span>
+                </span>
+                <span class="admin-req-actions">
+                  <button type="button" class="code-copy" data-code="${escapeHtml(row.code)}">Copy link</button>
+                  ${st.spent ? "" : `<button type="button" class="saved-delete code-disable" data-code="${escapeHtml(row.code)}">Turn off</button>`}
+                </span>
+              </li>`;
+            }).join("") : `<li class="admin-empty">No invite links yet.</li>`}
+          </ul>
+        </div>`;
+    }
+
     function renderInviteCard(rows, adminEmail) {
       return `
         <div class="admin-card">
@@ -3833,14 +4048,17 @@
       // Invite list ordering unchanged: active rows (deleted_at is null) first,
       // deleted ones after, oldest addition first within each group so the
       // serial numbers read as a stable running log.
-      const [allowed, requests] = await Promise.all([
+      const [allowed, requests, codes] = await Promise.all([
         sb.from("allowed_emails")
           .select("email, added_at, deleted_at")
           .order("deleted_at", { ascending: true, nullsFirst: true })
           .order("added_at", { ascending: true }),
         sb.from("access_requests")
-          .select("id, email, display_name, note, status, requested_at, last_requested_at, request_count")
+          .select("id, email, display_name, note, status, requested_at, last_requested_at, request_count, via_code")
           .order("last_requested_at", { ascending: false }),
+        sb.from("invite_codes")
+          .select("code, label, max_uses, uses, expires_at, disabled_at, created_at")
+          .order("created_at", { ascending: false }),
       ]);
 
       if (allowed.error) {
@@ -3857,6 +4075,7 @@
           <button type="button" class="btn-signout admin-back">Back to Margin</button>
         </div>
         ${renderPendingCard(pending, ignored, requests.error)}
+        ${renderCodesCard(codes.error ? [] : (codes.data || []))}
         ${renderInviteCard(allowed.data, adminEmail)}`;
 
       // Whatever the last approve/ignore had to say, now that there's somewhere
@@ -3872,6 +4091,7 @@
 
       wireAdminBack();
       wirePendingCard(adminEmail, pending);
+      wireCodesCard(adminEmail);
       // Keeps the masthead count honest after an approve or ignore.
       refreshAdminBadge();
 
@@ -3996,6 +4216,74 @@
       }
 
       renderAdminList(adminEmail);
+    }
+
+    function wireCodesCard(adminEmail) {
+      const form = $("code-add-form");
+      if (!form) return;
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const status = $("code-status");
+        const code = $("code-value").value.trim().toLowerCase();
+        if (!code) return;
+
+        const maxRaw = $("code-max").value.trim();
+        const days = $("code-expiry").value;
+        const row = {
+          code,
+          label: $("code-label").value.trim() || null,
+          // Blank means unlimited. claim_invite_code still caps the whole
+          // system at 30 redemptions an hour, so this can't run away.
+          max_uses: maxRaw === "" ? null : Number(maxRaw),
+          expires_at: days === ""
+            ? null
+            : new Date(Date.now() + Number(days) * 86400000).toISOString(),
+          created_by: ADMIN_USER_ID,
+        };
+
+        const { error } = await sb.from("invite_codes").insert(row);
+        if (error) {
+          status.hidden = false;
+          status.className = "admin-req-status error";
+          status.textContent = /duplicate|unique/i.test(error.message)
+            ? `“${code}” already exists — pick another.`
+            : "Couldn't create that: " + error.message;
+          return;
+        }
+        adminNotice = { error: false, text: `Invite link “${code}” is live. Copy it from the list below.` };
+        renderAdminList(adminEmail);
+      });
+
+      $("admin-section").querySelectorAll(".code-copy").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const link = inviteLinkFor(btn.dataset.code);
+          try {
+            await navigator.clipboard.writeText(link);
+            btn.textContent = "Copied";
+            setTimeout(() => { btn.textContent = "Copy link"; }, 1500);
+          } catch {
+            // Clipboard access needs a secure context and can still be refused.
+            // Showing the link is a worse experience than copying it, but it's
+            // a far better one than a button that silently does nothing.
+            const status = $("code-status");
+            status.hidden = false;
+            status.className = "admin-req-status";
+            status.textContent = link;
+          }
+        });
+      });
+
+      $("admin-section").querySelectorAll(".code-disable").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm(`Turn off “${btn.dataset.code}”? Anyone still holding that link won't be able to use it.`)) return;
+          const { error } = await sb.from("invite_codes")
+            .update({ disabled_at: new Date().toISOString() })
+            .eq("code", btn.dataset.code);
+          if (error) adminNotice = { error: true, text: "Couldn't turn that off: " + error.message };
+          renderAdminList(adminEmail);
+        });
+      });
     }
 
     async function ignoreRequest(id, adminEmail) {
