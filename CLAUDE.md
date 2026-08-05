@@ -106,9 +106,17 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   Links out to `guide.html` (already public at the GitHub Pages origin) for first-time
   recipients instead of attaching it — Supabase's template editor has no attachment
   mechanism at all, even with custom SMTP wired in, since GoTrue renders and sends the email
-  itself. Only the Magic Link template was redone (not "Invite user") since the actual invite
-  flow here is dashboard "Add user" → the person requests their own magic link, never
-  Supabase's separate invite email.
+  itself. Only the Magic Link template was redone at the time (not "Invite user") since the
+  invite flow then was dashboard "Add user" → the person requests their own magic link, never
+  Supabase's separate invite email. **That reasoning expired on 2026-08-05**, when
+  `approve-access` started calling `inviteUserByEmail` — so there is now a second template,
+  `supabase/email-templates/invite.html`, same table layout and web-safe fonts, written for a
+  first arrival rather than a returning sign-in: it says who added them, gives `guide.html`
+  real weight instead of a footnote, and tells them what to do if the one-time link has
+  expired (their account exists by then, so the normal "Send me a link" box works). Uses
+  `{{ .ConfirmationURL }}` and `{{ .Email }}`; subject "You're in — welcome to Margin". Same
+  caveat as its sibling: **the dashboard is the source of truth**, this file is a tracked copy,
+  and it is NOT live until it's pasted into Authentication → Emails → Templates → Invite user.
 - **Debugged 2026-07-31: a stale localhost-bound home-screen icon, not a real bug.** A report
   of "can't sign in from the saved app icon on Android" traced to `index.html`'s
   `emailRedirectTo: window.location.origin + window.location.pathname` (deliberately dynamic,
@@ -566,10 +574,12 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   tested is the part that sends actual email — approving a real request and having a real
   person receive an invite and get in. Test it with one address you control before letting
   anyone else near it. Two things to check while doing it:
-  1. **Supabase's "Invite user" email template has never been customized.** Only the Magic Link
-     template was redone (`supabase/email-templates/magic-link.html`) — deliberately, because
-     at the time the invite flow didn't use it. It does now, so the first invited person gets
-     Supabase's stock, unbranded email. Worth giving it the same treatment.
+  1. **Paste `supabase/email-templates/invite.html` into the dashboard first** (Authentication
+     → Emails → Templates → Invite user, subject "You're in — welcome to Margin"). It was
+     written 2026-08-05 but, like `magic-link.html`, the file is only a tracked copy — until
+     it's pasted in, the first person you approve gets Supabase's stock unbranded email, and
+     *then* every later sign-in gets the nice branded one. Backwards from what you want, since
+     the first impression is the one that decides whether they trust the link at all.
   2. **`https://debashis9.github.io/vocab_capture/` must be in Authentication → URL
      Configuration → Redirect URLs**, since that's the `redirectTo` the Edge Function sends.
      If it isn't an exact match, GoTrue silently falls back to Site URL — the exact failure
