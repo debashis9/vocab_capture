@@ -3970,11 +3970,15 @@
               invite link) makes one. Adding an email by hand below is the old half-step; it's
               still useful for pre-authorising someone, but they can't get in on it alone.</p>
 
-            <h3>Delete doesn't lock out anyone who has already signed in</h3>
-            <p>Same reason: the check only runs when an account is created, and theirs already
-              exists. Removing them here stops a <em>new</em> account being made with that
-              address, nothing more. To really cut someone off, delete their user in the
-              Supabase dashboard under Authentication → Users.</p>
+            <h3>Remove really does lock someone out</h3>
+            <p>It does three things at once: greys them out on the list, blocks their account so
+              no new sign-in link will work, and drops the sessions they already have. Two
+              caveats. Someone with the app open can keep reading their own saved words until
+              their current session expires — up to an hour. And their words are kept, not
+              deleted: this is "no longer allowed in", not "erase this person". To do that,
+              delete their user in the Supabase dashboard under Authentication → Users.</p>
+            <p><strong>Restore</strong> puts it all back — and so does adding the same address
+              again in the box above, which is the same action.</p>
 
             <h3>Invite links</h3>
             <ul>
@@ -4107,8 +4111,8 @@
                 ${isSelf
                   ? ""
                   : isDeleted
-                  ? `<span class="admin-deleted-badge">Deleted</span>`
-                  : `<button type="button" class="saved-delete admin-delete" data-email="${escapeHtml(row.email)}">Delete</button>`}
+                  ? `<button type="button" class="code-copy admin-restore" data-email="${escapeHtml(row.email)}">Restore</button>`
+                  : `<button type="button" class="saved-delete admin-delete" data-email="${escapeHtml(row.email)}">Remove</button>`}
               </li>`;
             }).join("") : `<li class="admin-empty">No emails yet.</li>`}
           </ul>
@@ -4183,8 +4187,12 @@
         // one that was previously deleted revives it (clears deleted_at)
         // while keeping its original added_at, since it's the same upsert
         // path either way.
-        const { error } = await sb.from("allowed_emails")
-          .upsert({ email, deleted_at: null }, { onConflict: "email" });
+        // Goes through set_email_access rather than writing the table
+        // directly, because "add" and "restore" are the same action here: an
+        // address that was previously revoked also has a banned auth account,
+        // and reviving the list row without lifting the ban would put them
+        // back on the list still unable to sign in.
+        const { error } = await sb.rpc("set_email_access", { p_email: email, p_revoke: false });
         if (error) {
           const status = $("admin-status");
           status.textContent = "Couldn't add: " + error.message;
@@ -4196,15 +4204,39 @@
 
       $("admin-section").querySelectorAll(".admin-delete").forEach((btn) => {
         btn.addEventListener("click", async () => {
-          // Soft delete: mark it instead of removing the row, so it stays
-          // visible (greyed out, at the bottom) with a record of when it
-          // was removed, instead of silently vanishing.
-          const { error } = await sb.from("allowed_emails")
-            .update({ deleted_at: new Date().toISOString() })
-            .eq("email", btn.dataset.email);
+          const email = btn.dataset.email;
+          // Worth a confirm now that this actually throws someone out rather
+          // than only greying a row.
+          if (!confirm(`Remove ${email}? They'll be signed out and won't be able to sign in again until you restore them. Their saved words are kept.`)) return;
+
+          // set_email_access does the whole job: soft-deletes the list row
+          // (still visible, greyed out, with the date), bans the auth account
+          // so GoTrue stops issuing tokens for it, and drops their sessions
+          // and refresh tokens. The old version wrote deleted_at and nothing
+          // else, which only stopped a *new* account being made with that
+          // address -- see supabase/sql/revoke-access.sql.
+          const { data, error } = await sb.rpc("set_email_access", { p_email: email, p_revoke: true });
+          const status = $("admin-status");
+          if (error) {
+            status.textContent = "Couldn't remove that: " + error.message;
+            status.hidden = false;
+            return;
+          }
+          if (data === "cannot_revoke_self") {
+            status.textContent = "That's your own account — you can't remove it here.";
+            status.hidden = false;
+            return;
+          }
+          renderAdminList(adminEmail);
+        });
+      });
+
+      $("admin-section").querySelectorAll(".admin-restore").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const { error } = await sb.rpc("set_email_access", { p_email: btn.dataset.email, p_revoke: false });
           if (error) {
             const status = $("admin-status");
-            status.textContent = "Couldn't delete: " + error.message;
+            status.textContent = "Couldn't restore that: " + error.message;
             status.hidden = false;
             return;
           }
