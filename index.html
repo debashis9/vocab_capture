@@ -800,6 +800,28 @@
       border: 1.5px solid var(--line);
     }
     .code-copy:hover { background: transparent; color: var(--oxblood); border-color: var(--oxblood); }
+
+    /* ---- Admin: the notes-to-self block ---- */
+    .admin-notes { margin-top: 20px; }
+    .admin-notes summary {
+      cursor: pointer; padding: 14px 4px;
+      color: var(--ink-soft); font-size: 14px; font-weight: 600;
+    }
+    .admin-notes summary:hover { color: var(--oxblood); }
+    .admin-notes-body {
+      background: var(--surface);
+      border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 4px 22px 22px;
+    }
+    .admin-notes-body h3 {
+      font-family: "Fraunces", serif; font-weight: 600; font-size: 16px;
+      margin: 22px 0 6px;
+    }
+    .admin-notes-body p { margin: 0 0 10px; font-size: 14px; line-height: 1.6; color: var(--ink-soft); }
+    .admin-notes-body ul { margin: 0; padding-left: 18px; }
+    .admin-notes-body li { font-size: 14px; line-height: 1.6; color: var(--ink-soft); margin-bottom: 8px; }
+    .admin-notes-body strong, .admin-notes-body em { color: var(--ink); }
+    .admin-notes-body em { font-style: italic; }
     .admin-add-form { display: flex; gap: 10px; }
     .admin-add-form input {
       flex: 1; min-width: 0;
@@ -3933,6 +3955,62 @@
         </div>`;
     }
 
+    // Everything on this page is used a few times a year at most, which is
+    // exactly long enough to forget how it behaves. Collapsed by default so it
+    // costs nothing on the screen, and one tap away when it's needed.
+    function renderAdminNotes() {
+      return `
+        <details class="admin-notes">
+          <summary>How this works — notes to self</summary>
+          <div class="admin-notes-body">
+            <h3>Letting someone in takes two things</h3>
+            <p>The invite list is <em>not</em> a login list. It's a check that runs at the moment
+              an account is created. So adding an email here on its own does nothing for the
+              person — they also need an account, and only <strong>Approve</strong> (or an
+              invite link) makes one. Adding an email by hand below is the old half-step; it's
+              still useful for pre-authorising someone, but they can't get in on it alone.</p>
+
+            <h3>Delete doesn't lock out anyone who has already signed in</h3>
+            <p>Same reason: the check only runs when an account is created, and theirs already
+              exists. Removing them here stops a <em>new</em> account being made with that
+              address, nothing more. To really cut someone off, delete their user in the
+              Supabase dashboard under Authentication → Users.</p>
+
+            <h3>Invite links</h3>
+            <ul>
+              <li><strong>Max uses</strong> is a hard cap, counted properly — two people
+                claiming the last use at the same moment can't both get in. Leave it blank for
+                unlimited, but see the last point.</li>
+              <li><strong>Expired, turned off, used up and never-existed all look identical</strong>
+                to whoever tries the link. That's deliberate, so a stranger can't probe for a
+                working code.</li>
+              <li>Someone already on the invite list doesn't <em>spend</em> a use — they're just
+                sent to the sign-in box.</li>
+              <li>A dead link isn't a dead end: it drops them into the "ask for access" form,
+                and they'll turn up in <em>Waiting for you</em> above.</li>
+              <li>There's a ceiling of <strong>30 sign-ups an hour</strong> across all links no
+                matter what you set. It exists because these emails send from your own Gmail
+                account, so an unlimited link that leaked could otherwise be used to send spam
+                with your name on it.</li>
+            </ul>
+
+            <h3>The queue</h3>
+            <p>One row per person however many times they ask — the "3 times" count is the
+              nudge, not three separate rows. <strong>Ignore</strong> is silent: they're never
+              told, and they can ask again later.</p>
+
+            <h3>About the emails</h3>
+            <p>Margin's emails often land in <strong>spam</strong>, because they come from an
+              ordinary Gmail account rather than a company mail server. Say "check your spam"
+              in the same message as the link. Once someone marks one <em>Not spam</em>, or
+              replies to it, the rest reach their inbox.</p>
+            <p>You'll also see a copy of every invite in <em>your own</em> mailbox. That's
+              Gmail filing your sent mail — Margin sends as you — not a misdelivered email.
+              Check the To: line before reading anything into it.</p>
+          </div>
+        </details>`;
+    }
+
     // A suggestion only — the field is editable, and a code someone has to
     // type off a WhatsApp message should be readable rather than random.
     function suggestCode() {
@@ -4076,7 +4154,8 @@
         </div>
         ${renderPendingCard(pending, ignored, requests.error)}
         ${renderCodesCard(codes.error ? [] : (codes.data || []))}
-        ${renderInviteCard(allowed.data, adminEmail)}`;
+        ${renderInviteCard(allowed.data, adminEmail)}
+        ${renderAdminNotes()}`;
 
       // Whatever the last approve/ignore had to say, now that there's somewhere
       // to say it. Cleared immediately so it shows once and not on every

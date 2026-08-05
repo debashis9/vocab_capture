@@ -649,6 +649,27 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
   - A dead code is never a dead end: the visitor drops into the ordinary request form with a
     message. Redemptions are logged into `access_requests` with `via_code` set, so the admin
     page shows how each person actually arrived.
+- **`#admin` carries its own documentation, added 2026-08-05** — a collapsed "How this works —
+  notes to self" block at the bottom of the page. Everything on that screen gets used a few
+  times a year, which is exactly long enough to forget, and the two facts most worth not
+  re-deriving (the invite list is a check at account-creation time, not a login list; Delete
+  doesn't lock out anyone who already signed in) are both counter-intuitive enough to be
+  actively misleading if half-remembered. Also covers the invite-link rules, that Ignore is
+  silent, the spam situation, and the Sent-copy confusion. If behaviour changes, change that
+  block too — it's the only documentation debashis9 will actually be looking at.
+- **The invite email was rewritten for deliverability, 2026-08-05**, after the first real one
+  went to spam. Gmail already DKIM-signs anything sent through its SMTP, so this was never an
+  authentication failure — it's content and sender scoring, and the changes are all in that
+  register: it reads as a letter rather than an announcement (the old version led with a big
+  "You're in." over a button, which is structurally what marketing mail looks like), it carries
+  more prose per link, it invites a reply and says the address is real (a reply is one of the
+  strongest positive signals a recipient can give Gmail), and it warns that the *next* email
+  may be filtered too. Subject changed to "Debashis added you to Margin" — person-to-person
+  rather than announcement. **Two settings live only in the dashboard and are not in any file:**
+  the Sender name under Project Settings → Auth → SMTP should be a human name, and the subject
+  line sits beside the template. None of this is a guarantee and it can't be; the reliable fix
+  stays on the recipient's side, which is why the guide and the WhatsApp message both say to
+  check spam.
 - **Still not built, deliberately:** the admin notification channel. If it's ever wanted,
   Telegram over email — one `fetch`, no domain, no verification, and it can't be spam-filtered
   the way Margin's own mail already is.

@@ -7,34 +7,46 @@
   the other so they don't drift.
 
   This is the FIRST email a new person ever gets from Margin. It's sent by
-  supabase/functions/approve-access/index.ts calling inviteUserByEmail(),
-  which happens when you tap Approve on a request in #admin. Until that
-  function existed nothing here ever sent an invite, which is why only the
-  Magic Link template was customized back in July — see CLAUDE.md.
-
-  Because it's a first arrival rather than a returning sign-in, the wording
-  differs from magic-link.html in three ways: it says who added them and why
-  they're getting it, it gives the guide real weight instead of a footnote,
-  and it says what to do if the link has expired (their account already
-  exists by this point, so the normal "Send me a link" box works).
+  supabase/functions/approve-access/index.ts (Approve in #admin) and by
+  supabase/functions/redeem-invite/index.ts (someone using an invite link).
 
   Supabase variables used:
     {{ .ConfirmationURL }}  the one-time link that signs them in
     {{ .Email }}            the address that was invited
   Subject line to set in the dashboard alongside this body:
-    You're in — welcome to Margin
+    Debashis added you to Margin
+
+  REVISED 2026-08-05 after the first real invite went to Gmail's spam folder.
+  Gmail already DKIM-signs mail sent through its own SMTP, so that was never
+  an authentication failure — it's content and sender scoring. What changed,
+  and why, so none of it gets "tidied" back:
+
+    - It reads as a letter rather than an announcement. The old version led
+      with a large "You're in." over a big button, which is structurally what
+      marketing mail looks like. It now opens with a sentence naming the
+      sender and what this is.
+    - More prose per link. A short message that is mostly one button is a
+      pattern spam filters are suspicious of.
+    - It invites a reply, and says the address is real. A reply is one of the
+      strongest positive signals a recipient can give Gmail about a sender,
+      and it's true — it goes to debashis9@gmail.com.
+    - It warns that the *next* email may land in spam too. Useful because the
+      sign-in link they'll need later comes from the same address.
+
+  None of this is a guarantee, and it can't be. The reliable fix is on the
+  recipient's side: telling people to check spam in the same WhatsApp message
+  as the link, and one "Not spam" or one reply teaching the filter for good.
 
   Written as email-safe HTML: table layout, inline styles, web-safe font
   fallbacks (Georgia / system sans) since most email clients strip <style>
-  blocks or block custom web fonts entirely — this deliberately does not
-  try to load Fraunces/Inter the way the app and guide do.
+  blocks or block custom web fonts entirely.
 -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>You're in — welcome to Margin</title>
+<title>Debashis added you to Margin</title>
 </head>
 <body style="margin:0; padding:0; background-color:#FBF9F4;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FBF9F4;">
@@ -54,13 +66,19 @@
           <!-- Card -->
           <tr>
             <td style="background-color:#FFFFFF; border:1px solid #E3DDD0; border-radius:16px; padding:32px;">
-              <p style="margin:0 0 12px; font-family:Georgia,'Times New Roman',serif; font-size:21px; line-height:1.4; color:#23201B;">
-                You're in.
+              <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:16px; line-height:1.6; color:#23201B;">
+                Hello — Debashis here.
               </p>
 
               <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:16px; line-height:1.6; color:#23201B;">
-                Debashis has added <strong style="color:#23201B;">{{ .Email }}</strong> to Margin — a small app for
-                catching words you meet while reading, looking them up, and keeping them.
+                I've added <strong style="color:#23201B;">{{ .Email }}</strong> to Margin, a small
+                app I've been building for readers. When you meet a word you don't know in a book,
+                you catch it — type it, say it, or point your camera at the page — and it keeps the
+                definition alongside the book you found it in.
+              </p>
+
+              <p style="margin:0 0 8px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:16px; line-height:1.6; color:#23201B;">
+                Your account is ready. This link signs you in:
               </p>
 
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
@@ -75,14 +93,20 @@
               </table>
 
               <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
-                That's a one-time link, so use it soon. If it's already expired by the time you
-                get to it, no harm done — open Margin and use <strong style="color:#6B6459;">Send me a link</strong>
-                to get a fresh one. Your account is set up either way.
+                It only works once, so use it soon. If it's already expired by the time you get to
+                it, open Margin and use <strong style="color:#6B6459;">Send me a link</strong> for a
+                fresh one — your account is set up either way.
               </p>
 
               <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
-                Weren't expecting this? You can safely ignore this email — nothing happens
-                unless the link above is opened.
+                If you'd rather check it's really me before tapping anything, just reply to this
+                email. It comes from my own address and I'll see it.
+              </p>
+
+              <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
+                One practical thing: Margin's emails come from an ordinary Gmail account, so your
+                next sign-in link may land in spam. If you move this one to your inbox — or just
+                reply to it — the rest will come through properly.
               </p>
 
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px; border-top:1px solid #E3DDD0;">
@@ -107,7 +131,7 @@
           <!-- Footer -->
           <tr>
             <td style="padding:20px 4px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:12.5px; color:#6B6459; text-align:center;">
-              Margin — a personal vocabulary-capture app.
+              Margin — a personal project, not a company. You're getting this because I added you.
             </td>
           </tr>
 
