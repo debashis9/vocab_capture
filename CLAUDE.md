@@ -560,9 +560,28 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
     and it still described the old "I'll need to add your email on my end first, so if sign-in
     doesn't work that's probably why" flow. It now covers both arrival paths — invited (a link
     is already in your inbox) and link-only (the app offers to ask for you, and a real person
-    has to approve it, so it won't be instant). Also fixed two things found while checking it:
-    the multi-sense button is called **Save this meaning**, not "Save this sense", and lookup
-    now fires as you type rather than needing the button.
+    has to approve it, so it won't be instant).
+  - **Then audited the whole guide against the running app, 2026-08-05** — it was written
+    around Phase 4 and had silently fallen a long way behind. What was wrong:
+    - **The privacy disclosure was materially incomplete**, which matters more than the rest
+      because the whole point of that list is to say what leaves your device. It named only the
+      dictionary API and the AI tab. It did not mention that **photographs** — page scans and
+      book covers both — are sent to `generativelanguage.googleapis.com` to be read, or that a
+      scanned book's ISBN goes to Open Library for cover art. Now enumerated, with the note
+      that Margin itself doesn't keep the photos.
+    - **OCR page-scanning and the book library/cover-scanning were absent entirely**, despite
+      being the two biggest things built since. Added, including the crop step and the "Enter
+      it manually instead" fallback.
+    - **The saved list is collapsed by default** since the declutter round; the guide told
+      people to tap "Practice above your saved list" without mentioning they have to open the
+      list at all. Rewritten, and it now also covers the optional "line from your book" field
+      and the **Learned it** toggle (greyed out in the list, excluded from practice).
+    - Two label drifts: the multi-sense button is **Save this meaning**, not "Save this sense",
+      and lookup fires as you type rather than needing the button. Android's card now also
+      mentions the in-app **Install Margin** button.
+    - Worth repeating the general lesson: this drifted because nothing links the guide to the
+      code. Any round that changes a visible label or a data flow should get a glance at
+      `guide.html` before it's called done.
   - **Fixed a real layout bug in `guide.html`'s install steps**, found by screenshotting them.
     `ol.steps li` was `display: flex; gap: 12px`, which makes the counter badge, every text run
     *and* every `<strong>` a separate flex item — so "Tap the **Share** icon (square with an
