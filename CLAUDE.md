@@ -673,14 +673,34 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
 - **Still not built, deliberately:** the admin notification channel. If it's ever wanted,
   Telegram over email — one `fetch`, no domain, no verification, and it can't be spam-filtered
   the way Margin's own mail already is.
-- **Known, not urgent: "Delete" on the invite list does not revoke anyone who has already
-  signed in.** `check_allowed_email()` is a `before insert on auth.users` trigger, so it never
-  runs again for an existing account — a soft-deleted email keeps working indefinitely. The
-  2026-07-31 note claiming Delete is "a real revocation" is only true for someone who never had
-  an account. Confirmed 2026-08-05 that no live user is currently in that state (both accounts
-  are on the list, neither deleted), so nothing is leaking today. The fix belongs in
-  `approve-access` (ban or delete the `auth.users` row on revoke), which already holds the
-  service-role key.
+- **FIXED 2026-08-05: the invite list's Delete is now a real revocation.** It previously only
+  wrote `deleted_at`, and since `check_allowed_email()` is a `before insert on auth.users`
+  trigger that never runs again for an existing account, removing someone who had already
+  signed in did nothing to them at all — the 2026-07-31 claim that Delete was "a real
+  revocation" happened to be true only because it was tested against an address that had never
+  had an account. Now `public.set_email_access(email, revoke)`
+  (`supabase/sql/revoke-access.sql`, applied) does the whole job in one place: soft-deletes the
+  list row, sets `auth.users.banned_until` 100 years out, and drops the person's
+  `auth.sessions` and `auth.refresh_tokens` so an existing login can't keep refreshing itself.
+  - **`banned_until` rather than a trigger on `auth.sessions`.** The trigger approach would
+    also work and is a much worse idea — raising exceptions inside GoTrue's internal tables
+    breaks on a GoTrue upgrade and surfaces as an opaque 500 to whoever is signing in.
+    `banned_until` is GoTrue's own supported field.
+  - **Revoke and restore are one function on purpose.** They have to move together: a
+    previously-revoked address has a banned account, so reviving only the list row would put
+    them back on the list still unable to sign in. That's exactly how the two halves drifted
+    apart before, when Delete lived on a button and restore lived in the Add box. The admin
+    page now has **no direct writes to `allowed_emails` left at all** — Remove, Restore and Add
+    all go through the RPC. A test asserts that.
+  - It's `SECURITY DEFINER` with its own `auth.uid()` check rather than relying on RLS, since a
+    function that reaches into the `auth` schema shouldn't depend on the caller having been
+    filtered somewhere else. Verified live, rolled back: ban set, sessions and refresh tokens
+    zeroed, restore clears the ban, revoking your own account returns `cannot_revoke_self`, and
+    a non-admin caller gets `not authorized`.
+  - **Two things revocation deliberately doesn't do**, both noted in the admin page's own
+    notes: their current access token stays valid until it expires (up to an hour), so someone
+    with the app already open can keep reading their own saved words until then; and their data
+    is kept, because this is "no longer allowed in", not "erase this person".
 - **Everything else is merged to `main` and pushed.** The three parked features (offline mode, OCR,
   book library) all landed on `main`; `future/ocr-offline-library` is now a leftover branch, not
   where work happens.
