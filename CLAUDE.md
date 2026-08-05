@@ -556,6 +556,20 @@ physical book, look it up, and keep it — tagged to the book. Single-user, pers
     requests folded into a `<details>`. The two lists load in parallel and are independent: if
     `access_requests` fails to load, the invite list still renders, since that half worked
     before any of this existed.
+  - **`guide.html` was updated to match**, since both email templates point first-timers at it
+    and it still described the old "I'll need to add your email on my end first, so if sign-in
+    doesn't work that's probably why" flow. It now covers both arrival paths — invited (a link
+    is already in your inbox) and link-only (the app offers to ask for you, and a real person
+    has to approve it, so it won't be instant). Also fixed two things found while checking it:
+    the multi-sense button is called **Save this meaning**, not "Save this sense", and lookup
+    now fires as you type rather than needing the button.
+  - **Fixed a real layout bug in `guide.html`'s install steps**, found by screenshotting them.
+    `ol.steps li` was `display: flex; gap: 12px`, which makes the counter badge, every text run
+    *and* every `<strong>` a separate flex item — so "Tap the **Share** icon (square with an
+    arrow)" rendered as three independently-wrapping columns, and the Android step (four bold
+    spans) as five. The badge is now absolutely positioned and the li is a normal block, so the
+    text flows as one sentence. Worth knowing generally: `display: flex` on anything containing
+    mixed inline markup will do this.
 - **The `#admin` route has a way in and a way out, 2026-08-05.** An Admin button sits in the
   masthead beside Sign out, rendered only when the signed-in id matches `ADMIN_USER_ID`, and
   carrying the pending count in its label (`Admin · 3`) since there's no notification channel
