@@ -96,17 +96,22 @@
   }
   .platform-note { color: var(--ink-soft); font-size: 13px; margin: 0 0 14px; }
   ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  /* The numbered badge is positioned rather than being a flex sibling. It used
+     to be `display:flex; gap:12px` on the li, which made the badge, every text
+     run AND every <strong> a separate flex item -- so "Tap the <strong>Share</strong>
+     icon..." laid out as three independently-wrapping columns instead of one
+     sentence. Worst on the Android step, which has four bold spans in it. */
   ol.steps li {
     counter-increment: step;
-    display: flex; gap: 12px;
+    position: relative;
     font-size: 14.5px; line-height: 1.5;
-    padding: 8px 0;
+    padding: 8px 0 8px 32px;
     border-top: 1px solid var(--line);
   }
   ol.steps li:first-child { border-top: none; padding-top: 0; }
   ol.steps li::before {
     content: counter(step);
-    flex: 0 0 auto;
+    position: absolute; left: 0; top: 9px;
     width: 20px; height: 20px;
     border-radius: 50%;
     background: var(--oxblood-soft);
@@ -115,6 +120,7 @@
     display: flex; align-items: center; justify-content: center;
     font-variant-numeric: tabular-nums;
   }
+  ol.steps li:first-child::before { top: 1px; }
 
   /* ---- link callout ---- */
   .link-callout {
@@ -163,7 +169,7 @@
     <p>A few honest things before you install it:</p>
     <ul class="disclaimers">
       <li>This is a personal project, not a finished product — expect rough edges, and things may look different next week as I keep working on it.</li>
-      <li>You'll sign in with just your email (a link we send you, no password) — I'll need to add your email on my end first, so if sign-in doesn't work, that's probably why. Once you're in, your saved words follow your account across devices.</li>
+      <li>You'll sign in with just your email — a link we send you, no password. Margin is invite-only, so if your address isn't on the list yet the app won't just fail at you: it'll offer to ask on your behalf. Leave your name and you'll get an email once I've added you. Once you're in, your saved words follow your account across devices.</li>
       <li>It's free, no payment details — ever. Signing in is just to keep your list yours and separate from anyone else testing this.</li>
       <li>Your saved words are stored privately under your account, not shared with other testers. Lookups go out to a free public dictionary by default; if you try the optional "AI" tab, that word (and whatever book you typed) is sent to Google's Gemini for that one request — nothing else about you or your device.</li>
     </ul>
@@ -208,8 +214,9 @@
   <section class="section">
     <h2>Trying it out</h2>
     <p class="section-lede">Once it's on your home screen, open it like any app — it'll fill the screen with no browser bar around it.</p>
-    <p>First time in, it'll ask for your email and send you a sign-in link — tap that link (it'll open the app again, now signed in) and you won't need to do it again on that device.</p>
-    <p>Type (or tap the mic and speak) a word you've come across recently, add the title of whatever you were reading in the "Reading" field, and hit Look up. Some words only have one meaning — that's a single card with a Save to list button. Others have several ("rubric" has ten!) — you'll see them grouped by part of speech, each with its own Save this sense button, so you can pick whichever one actually matches how you saw it used. That's really it — the more real words you try, the more useful your feedback is.</p>
+    <p>First time in, it'll ask for your email. If you've already been added — which you have, if an email invited you here — a sign-in link lands in your inbox. Tap it, the app reopens signed in, and you won't need to do this again on that device.</p>
+    <p>If you've only got the link and haven't been added yet, the app will say so and offer to ask for you: leave your name and a line about how we know each other, and you'll get an email once I've approved it. That last part is a real person tapping a button, so it won't be instant.</p>
+    <p>Type (or tap the mic and speak) a word you've come across recently, add the title of whatever you were reading in the "Reading" field, and hit Look up — or just pause, since it searches as you type. Some words only have one meaning — that's a single card with a Save to list button. Others have several ("rubric" has ten!) — you'll see them grouped by part of speech, each with its own Save this meaning button, so you can pick whichever one actually matches how you saw it used. That's really it — the more real words you try, the more useful your feedback is.</p>
     <p>Next to "Dictionary" on the result card there's an <strong>AI</strong> tab — tap it for an AI-written definition instead, which tries to match the sense of the word to whatever book you typed in "Reading." It takes a few seconds the first time (it's asking an AI model, not just looking a word up), then it's instant if you switch back and forth. Totally optional — the free dictionary is the default and works fine without it.</p>
     <p>Once you've saved a few, tap <strong>Practice</strong> above your saved list to review them — as flashcards (tap a card to flip it and reveal the meaning), or as a quick multiple-choice quiz. Quiz mode needs at least 4 saved words to have enough wrong answers to choose from; flashcards work with just one.</p>
     <p>There's also a small light / dark / system icon in the top corner if the default look isn't to your taste.</p>
