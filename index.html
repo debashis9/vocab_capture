@@ -3970,15 +3970,26 @@
               invite link) makes one. Adding an email by hand below is the old half-step; it's
               still useful for pre-authorising someone, but they can't get in on it alone.</p>
 
-            <h3>Remove really does lock someone out</h3>
-            <p>It does three things at once: greys them out on the list, blocks their account so
-              no new sign-in link will work, and drops the sessions they already have. Two
-              caveats. Someone with the app open can keep reading their own saved words until
-              their current session expires — up to an hour. And their words are kept, not
-              deleted: this is "no longer allowed in", not "erase this person". To do that,
-              delete their user in the Supabase dashboard under Authentication → Users.</p>
-            <p><strong>Restore</strong> puts it all back — and so does adding the same address
-              again in the box above, which is the same action.</p>
+            <h3>Remove really does lock someone out — by banning their account</h3>
+            <p>Three things happen at once: they're greyed out on this list, their Supabase
+              account is <strong>banned</strong> so no new sign-in link will work for it, and
+              any session they already have is dropped.</p>
+            <p>The ban is the part doing the real work. Because the invite-list check only runs
+              when an account is created, greying someone out here achieves nothing on its own
+              for anyone who has already signed in — that was a genuine hole until it was fixed,
+              and the ban is what closed it. If you look the person up in the Supabase dashboard
+              under Authentication → Users you'll see the account marked banned with a date
+              roughly a hundred years out. That's not a mistake; it's what "indefinitely" looks
+              like when the field wants a date.</p>
+            <p><strong>Restore</strong> lifts the ban and puts them back on the list. Adding the
+              same address again in the box above does exactly the same thing — they're one
+              action, deliberately. <strong>What you shouldn't do is unban them from the
+              Supabase dashboard instead:</strong> that lets them straight back in while this
+              list still shows them as removed, which is worse than either state on its own.</p>
+            <p>Two things Remove doesn't do. Someone with the app already open can keep reading
+              their own saved words until their session expires — up to an hour. And their words
+              are kept: this is "no longer allowed in", not "erase this person". For that,
+              delete their user in the Supabase dashboard.</p>
 
             <h3>Invite links</h3>
             <ul>
