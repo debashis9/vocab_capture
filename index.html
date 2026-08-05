@@ -727,6 +727,11 @@
       padding: 26px 24px;
     }
     .admin-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 22px; margin: 0 0 18px; }
+    .admin-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin: 0 0 18px;
+    }
+    .admin-head .admin-title { margin: 0; }
     .admin-add-form { display: flex; gap: 10px; }
     .admin-add-form input {
       flex: 1; min-width: 0;
@@ -797,6 +802,11 @@
       <!-- Sign out sits up here with the theme toggle rather than in its own
            strip below: it's account chrome, not part of capturing a word. -->
       <div class="header-actions">
+        <!-- Only ever rendered for the admin account (see showSignedIn). This
+             doesn't weaken anything: the #admin hash was never a secret, and
+             RLS -- not the visibility of this button -- is what actually
+             stops anyone else reading the invite list. -->
+        <button id="admin-link" type="button" class="btn-signout" hidden>Admin</button>
         <button id="sign-out" type="button" class="btn-signout" hidden>Sign out</button>
         <button id="theme-toggle" type="button" class="btn-theme" aria-label="Theme: System. Tap to change."></button>
       </div>
@@ -952,6 +962,12 @@
 
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // Declared up here rather than down in the admin section where it's mostly
+    // used: showSignedIn() reads it to decide whether to show the Admin button,
+    // and a `const` declared further down the script would be in its temporal
+    // dead zone if that ever ran synchronously during initial parse.
+    const ADMIN_USER_ID = "650351f4-7164-48df-a983-a722faa6521d";
+
     // Tracked so the storage functions below can refuse to run when signed out.
     let currentSession = null;
 
@@ -960,6 +976,7 @@
       $("app-content").hidden = true;
       $("auth-section").hidden = false;
       $("sign-out").hidden = true;
+      $("admin-link").hidden = true;
     }
 
     function showSignedIn(session) {
@@ -969,6 +986,10 @@
       // Sign out lives in the masthead now, outside #app-content, so it has
       // to be shown/hidden explicitly with the signed-in state.
       $("sign-out").hidden = false;
+      // The way into the admin route, for the one account that has one. Anyone
+      // else signed in never sees it (and gets nothing from the hash anyway --
+      // the RLS policies on allowed_emails/access_requests are the boundary).
+      $("admin-link").hidden = session.user.id !== ADMIN_USER_ID;
       // Saved words are per-account now, so (re)load them the moment we know
       // who's signed in — on initial load and again after a fresh sign-in.
       refreshSavedList();
@@ -3429,21 +3450,36 @@
     // no unconditional call here, since getEntries() refuses to run signed out.
 
     // ---------- admin: invite list (private, #admin route only) ----------
-    // Not linked from anywhere in the normal UI. The real access control is
-    // the allowed_emails RLS policies in Supabase (this admin's auth.uid()
-    // hardcoded there, see supabase/sql/admin-allowed-emails-rls.sql) — this
-    // client-side check only keeps the experience clean for anyone else who
-    // stumbles onto the hash; it grants nothing by itself, since a
-    // non-admin's Supabase queries below come back empty (or get rejected)
-    // regardless of what this check decides. Deliberately independent of the
-    // auth section above — its own onAuthStateChange subscription and its
-    // own getSession() call, so nothing in the sign-in/sign-out flow changes.
-    const ADMIN_USER_ID = "650351f4-7164-48df-a983-a722faa6521d";
+    // Reachable from the masthead's Admin button, which only renders for the
+    // admin account (see showSignedIn) — but the hash still works on its own,
+    // and that's fine. The real access control is the RLS policies on
+    // allowed_emails / access_requests (this admin's auth.uid() hardcoded
+    // there, see supabase/sql/admin-allowed-emails-rls.sql) — the client-side
+    // check below only keeps the experience clean for anyone else who stumbles
+    // onto the hash; it grants nothing by itself, since a non-admin's Supabase
+    // queries come back empty (or get rejected) regardless of what it decides.
+    // ADMIN_USER_ID now lives up top with the Supabase client, since
+    // showSignedIn needs it too. Deliberately independent of the auth section
+    // above — its own onAuthStateChange subscription and its own getSession()
+    // call, so nothing in the sign-in/sign-out flow changes.
 
     function checkAdminRoute(session) {
       const isAdminRoute = location.hash === "#admin";
       $("admin-section").hidden = !isAdminRoute;
-      if (!isAdminRoute) return;
+      if (!isAdminRoute) {
+        // Restoring the normal screen on the way *out* is new. Until the Admin
+        // button existed, the only way off this route was a page reload, so
+        // nothing ever hit this path and app-content stayed hidden — which is
+        // exactly what the "Back to Margin" button would have done otherwise.
+        if (session) {
+          $("auth-section").hidden = true;
+          $("app-content").hidden = false;
+        } else {
+          $("app-content").hidden = true;
+          $("auth-section").hidden = false;
+        }
+        return;
+      }
 
       if (!session) {
         // Not signed in yet — let the normal sign-in screen show as usual;
@@ -3456,11 +3492,31 @@
       $("app-content").hidden = true;
 
       if (session.user.id !== ADMIN_USER_ID) {
-        $("admin-section").innerHTML = `<p class="admin-denied">Not authorized.</p>`;
+        $("admin-section").innerHTML =
+          `<div class="admin-card">
+             <p class="admin-denied">Not authorized.</p>
+             <button type="button" class="btn-signout admin-back">Back to Margin</button>
+           </div>`;
+        wireAdminBack();
         return;
       }
       renderAdminList(session.user.email);
     }
+
+    // Leaves the admin route without leaving a bare "#" in the address bar the
+    // way `location.hash = ""` would. replaceState doesn't fire hashchange, so
+    // the re-check has to be explicit.
+    function leaveAdminRoute() {
+      history.replaceState(null, "", location.pathname + location.search);
+      checkAdminRoute(currentSession);
+    }
+
+    function wireAdminBack() {
+      $("admin-section").querySelectorAll(".admin-back")
+        .forEach((btn) => btn.addEventListener("click", leaveAdminRoute));
+    }
+
+    $("admin-link").addEventListener("click", () => { location.hash = "#admin"; });
 
     function formatDateTime(iso) {
       return new Date(iso).toLocaleString(undefined, {
@@ -3484,7 +3540,10 @@
 
       $("admin-section").innerHTML = `
         <div class="admin-card">
-          <h2 class="admin-title">Invite list</h2>
+          <div class="admin-head">
+            <h2 class="admin-title">Invite list</h2>
+            <button type="button" class="btn-signout admin-back">Back to Margin</button>
+          </div>
           <form id="admin-add-form" class="admin-add-form">
             <input id="admin-add-email" type="email" placeholder="email@example.com" required />
             <button type="submit">Add</button>
@@ -3512,6 +3571,8 @@
             }).join("") : `<li class="admin-empty">No emails yet.</li>`}
           </ul>
         </div>`;
+
+      wireAdminBack();
 
       $("admin-add-form").addEventListener("submit", async (e) => {
         e.preventDefault();
