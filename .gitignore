@@ -35,9 +35,15 @@ Thumbs.db
 desktop.ini
 
 # --- Claude Code local session files (keep project-shared config, ignore local state) ---
-# CLAUDE.md is intentionally NOT ignored — it's shared project context you WANT in the repo.
 .claude/settings.local.json
 .claude/.credentials.json
+
+# CLAUDE.md is the working engineering journal — operational notes, admin workflow,
+# what's verified and what isn't. Useful to keep writing, not useful to publish, so
+# it stays local from here on. Untracked as of 2026-08-08.
+# NOTE: this only stops FUTURE commits. Every past version is still in the git
+# history and readable on GitHub until the history itself is rewritten.
+CLAUDE.md
 
 # --- Build output (only if you ever add a build step; harmless now) ---
 dist/
