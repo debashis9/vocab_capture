@@ -12,7 +12,8 @@ It's a [progressive web app](https://web.dev/progressive-web-apps/) — installs
 screen, runs full-screen, works offline for the parts that can.
 
 🔗 **[debashis9.github.io/vocab_capture](https://debashis9.github.io/vocab_capture/)** ·
-📖 **[Install guide](https://debashis9.github.io/vocab_capture/guide.html)**
+📖 **[Install guide](https://debashis9.github.io/vocab_capture/guide.html)** ·
+🧭 **[Decisions](DECISIONS.md)** — why it's built this way, and what lost
 
 > Sign-in is invite-only — this is a personal tool being tested by family and friends, not
 > a public service. The app is fully browsable without an account.
@@ -93,6 +94,10 @@ index.html ──────────────► dictionaryapi.dev      
 3. **Keep the visual language calm and editorial** — warm paper, oxblood accent, Fraunces for
    the word itself and Inter for the interface, and it has to stay accessible and work on a
    phone.
+
+The reasoning behind the less obvious choices — a 26B model instead of an OCR library, security
+in the database rather than the app, invite codes instead of a notification system — is written
+up in **[DECISIONS.md](DECISIONS.md)**, including the ones where the first answer was wrong.
 
 ## What leaves your device
 
