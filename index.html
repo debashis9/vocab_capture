@@ -96,11 +96,52 @@
       padding-right: 130px; /* keep the title clear of Sign out + the theme toggle */
     }
     .brand .dot { color: var(--oxblood); }
+    /* The margin rule: the red line down the left of a ruled page, which is
+       also what the app icon is built on. Purely decorative, so it's a
+       pseudo-element -- nothing for a screen reader to read out. */
+    .brand::before {
+      content: "";
+      display: inline-block;
+      width: 5px;
+      height: 0.95em;
+      border-radius: 2.5px;
+      background: var(--oxblood);
+      margin-right: 12px;
+      vertical-align: -0.12em;
+    }
     /* The one mark: a dog-eared page corner, the reader's own way of saying
        "come back to this" — which is the whole app in one gesture. Kept at
        text size beside the wordmark rather than blown up as a logo. */
-    .dogear { display: inline-flex; vertical-align: -2px; margin-left: 8px; color: var(--ink-soft); }
+    /* Now a real <button> that opens the FAQ, not an inert glyph -- so it has to
+       undo the global button rule, which paints every button oxblood-on-paper. */
+    .dogear {
+      display: inline-flex; vertical-align: -2px; margin-left: 8px;
+      background: transparent; color: var(--ink-soft);
+      border: none; padding: 2px; border-radius: 6px;
+    }
+    .dogear:hover, .dogear:focus-visible,
+    .dogear[aria-expanded="true"] { background: transparent; color: var(--oxblood); }
     .tagline { margin: 4px 0 0; color: var(--ink-soft); font-size: 14px; }
+
+    /* ---- FAQ panel, opened from the dog-ear ---- */
+    .faq {
+      margin: 18px 0 0;
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px 20px 4px;
+    }
+    .faq-intro { margin: 0 0 16px; font-size: 13.5px; line-height: 1.55; color: var(--ink-soft); }
+    .faq-intro a { color: var(--oxblood); }
+    .faq-group { margin: 0 0 18px; }
+    .faq-group h3 {
+      margin: 0 0 10px; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
+    }
+    .faq dl { margin: 0; }
+    .faq dt { font-family: "Fraunces", serif; font-weight: 600; font-size: 15px; margin: 0 0 3px; }
+    .faq dd { margin: 0 0 13px; font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
+    .faq dd:last-child { margin-bottom: 0; }
 
     /* Account + theme chrome, out of the way in the masthead corner. */
     .header-actions {
@@ -908,15 +949,121 @@
         <button id="sign-out" type="button" class="btn-signout" hidden>Sign out</button>
         <button id="theme-toggle" type="button" class="btn-theme" aria-label="Theme: System. Tap to change."></button>
       </div>
-      <h1 class="brand">Margin<span class="dot">.</span><span class="dogear" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="22" height="22">
+      <h1 class="brand">Margin<span class="dot">.</span><button id="faq-toggle" type="button"
+        class="dogear" aria-expanded="false" aria-controls="faq-panel"
+        aria-label="About Margin — common questions">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
           <path d="M3.5 3.5h11.5L20.5 9v11.5h-17z" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
           <path d="M15 3.5V9h5.5z" fill="var(--oxblood)"/>
         </svg>
-      </span></h1>
+      </button></h1>
       <p class="tagline">Catch a word mid-page.</p>
       <button id="install" type="button" class="btn-install" hidden>Install Margin</button>
     </header>
+
+    <!-- Opened from the dog-ear in the masthead. Deliberately sits outside
+         #app-content so it's readable signed out too -- someone deciding
+         whether to ask for access can see what leaves their device first. -->
+    <section id="faq-panel" class="faq" hidden>
+      <p class="faq-intro">Short answers on how Margin works, and what it does with your
+        things. Installing it is covered in the <a href="guide.html">guide</a>.</p>
+
+      <div class="faq-group">
+        <h3>Looking a word up</h3>
+        <dl>
+          <dt>Where do the definitions come from?</dt>
+          <dd>A free public dictionary API built on Wiktionary's data. No account or key
+            needed, and it's what every lookup uses by default.</dd>
+
+          <dt>Why does one word show several meanings?</dt>
+          <dd>Because most words have several. Margin shows every sense, grouped by part of
+            speech, and lets you save the one that matches how you actually saw it used
+            rather than guessing on your behalf.</dd>
+
+          <dt>What is the AI tab?</dt>
+          <dd>An optional second opinion. It asks an AI model for a definition written for
+            whatever book is in your “Reading” field, so an ambiguous word gets the sense
+            that fits. It only runs when you open the tab, never on every lookup.</dd>
+
+          <dt>The word wasn't found — is that a dead end?</dt>
+          <dd>No. The card still appears with the AI tab a tap away, which is usually the
+            answer for names, slang and very new words. If you're offline you'll get a
+            “Save for later” button instead.</dd>
+
+          <dt>Can I say the word instead of typing it?</dt>
+          <dd>Yes — the mic button uses your device's own speech recognition.</dd>
+        </dl>
+      </div>
+
+      <div class="faq-group">
+        <h3>Reading off the page</h3>
+        <dl>
+          <dt>What does the scan button do?</dt>
+          <dd>Takes a photo of the page — or uses one you already have — and lets you drag a
+            box around the part you care about. Every word in it becomes tappable, appearing
+            as they're recognised.</dd>
+
+          <dt>What happens to the photo?</dt>
+          <dd>It's sent to Google's Gemini to be read back as text, then discarded. Margin
+            doesn't keep photos.</dd>
+
+          <dt>Can I scan a book instead of typing its title?</dt>
+          <dd>Yes. Scan the cover and it fills in the title, author and ISBN; the cover
+            picture comes from Open Library. There's a manual entry fallback if the cover is
+            damaged or too shiny to read.</dd>
+
+          <dt>What is “the line from your book”?</dt>
+          <dd>An optional field for the actual sentence you met the word in — which is a
+            different thing from the dictionary's own example sentence.</dd>
+        </dl>
+      </div>
+
+      <div class="faq-group">
+        <h3>Your words</h3>
+        <dl>
+          <dt>Where are my saved words kept?</dt>
+          <dd>In your own account, so they follow you from your phone to any other device
+            you sign in on.</dd>
+
+          <dt>Can anyone else see them?</dt>
+          <dd>No. Every saved word is tied to your account, and the database enforces that
+            itself rather than trusting the app to.</dd>
+
+          <dt>What does “Learned it” do?</dt>
+          <dd>Marks a word as one you've got. It stays in your list, greyed out, and stops
+            coming up in practice.</dd>
+
+          <dt>How does practice work?</dt>
+          <dd>Flashcards you tap to flip, or a quick multiple-choice quiz. Both are built
+            from your own saved words — no AI, no connection needed. Filter to one book
+            first and you'll practise only that book. The quiz needs at least four saved
+            words to have enough wrong answers to offer.</dd>
+        </dl>
+      </div>
+
+      <div class="faq-group">
+        <h3>Offline, updates and access</h3>
+        <dl>
+          <dt>Does it work without a connection?</dt>
+          <dd>Your saved words and practice do, from a copy kept on the device. Looking up a
+            new word needs the network — but you can queue one with “Save for later” and it
+            resolves itself once you're back online.</dd>
+
+          <dt>Why did a “new version” bar appear?</dt>
+          <dd>The app updated itself in the background. Tapping Refresh loads the new one;
+            nothing is lost either way.</dd>
+
+          <dt>Why is signing in invite-only?</dt>
+          <dd>It's a personal project rather than a service. If you have the link but no
+            account yet, the app will offer to ask on your behalf.</dd>
+
+          <dt>The sign-in email never arrived.</dt>
+          <dd>Check your spam folder. Margin's mail comes from an ordinary personal Gmail
+            account, which is often enough for it to be filtered the first time. Mark it
+            “Not spam” once and the rest arrive normally.</dd>
+        </dl>
+      </div>
+    </section>
 
     <!-- Signed-out state: only this shows. Signed-in state: only #app-content shows. -->
     <section id="auth-section" class="auth-section" hidden>
@@ -2399,6 +2546,15 @@
       applySavedOpenState();
     });
     applySavedOpenState();
+
+    // The FAQ behind the dog-ear. Unlike the saved list, open/closed is NOT
+    // remembered: it's reference material you dip into and close again, so it
+    // should never be sitting open above the word field on the next visit.
+    $("faq-toggle").addEventListener("click", () => {
+      const opening = $("faq-panel").hidden;
+      $("faq-panel").hidden = !opening;
+      $("faq-toggle").setAttribute("aria-expanded", String(opening));
+    });
 
     // Re-reads everything from storage and redraws the filter dropdown + the list.
     async function refreshSavedList() {

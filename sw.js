@@ -2,7 +2,7 @@
 // Job in Phase 1: make the app installable and let the *shell* open offline.
 // It deliberately does NOT cache dictionary lookups (those need the live network).
 
-const CACHE = "margin-shell-v41";
+const CACHE = "margin-shell-v44";
 
 // Files that make up the app shell.
 const SHELL = [
@@ -11,6 +11,7 @@ const SHELL = [
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/icon-maskable-512.png",
 ];
 
 // The one cross-origin file the app shell can't start without -- without
