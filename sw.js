@@ -2,16 +2,21 @@
 // Job in Phase 1: make the app installable and let the *shell* open offline.
 // It deliberately does NOT cache dictionary lookups (those need the live network).
 
-const CACHE = "margin-shell-v44";
+const CACHE = "margin-shell-v45";
 
 // Files that make up the app shell.
 const SHELL = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
-  "./icons/icon-maskable-512.png",
+  // Versioned filenames on purpose. Android bakes the icon into a WebAPK at
+  // install time and decides whether to regenerate by diffing the manifest --
+  // including icon URLs. Replacing the bytes behind an unchanged filename is
+  // invisible to that check, so a new icon can take days to appear or never
+  // land at all. Change the suffix whenever the artwork changes.
+  "./icons/icon-192-v2.png",
+  "./icons/icon-512-v2.png",
+  "./icons/icon-maskable-512-v2.png",
 ];
 
 // The one cross-origin file the app shell can't start without -- without

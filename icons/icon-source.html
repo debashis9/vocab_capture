@@ -26,12 +26,19 @@ const M = (cx, by, fs) =>
 
 let inner;
 if (variant === "maskable") {
-  // Full-bleed background; band and M pulled inside the 80% safe zone so an
-  // aggressive circular mask can't shave either of them.
+  // Full-bleed background, and the M pulled inside the 80% safe zone so an
+  // aggressive circular mask can't shave it.
+  //
+  // The band runs flush to the left edge and is made WIDER instead of being
+  // inset. Insetting it (x=72) kept it inside the safe zone but left a strip
+  // of ruled paper to its left -- and since Android uses the maskable icon for
+  // the home screen, that strip is what actually shipped. Flush + wide means
+  // every mask shape, from square to circle, crops into the band itself and
+  // never reveals paper beside it.
   inner = `<rect width="512" height="512" fill="${PAPER}"/>`
         + rules(20)
-        + `<rect x="72" y="0" width="112" height="512" fill="${OX}"/>`
-        + M(320, 350, 250);
+        + `<rect x="0" y="0" width="150" height="512" fill="${OX}"/>`
+        + M(330, 345, 240);
 } else {
   inner = `<rect width="512" height="512" rx="115" fill="${PAPER}"/>`
         + rules(20)
