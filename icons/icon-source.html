@@ -1,0 +1,47 @@
+<meta charset="utf-8">
+<style>
+  html, body { margin:0; padding:0; background:transparent; }
+  svg { display:block; }
+</style>
+<body>
+<script>
+// Margin app icon — candidate I: oxblood margin band on a ruled page,
+// with an ink Fraunces M sitting in the writing area.
+// ?v=any|maskable   &s=<pixel size>
+const q = new URLSearchParams(location.search);
+const variant = q.get("v") || "any";
+const size = parseInt(q.get("s") || "512", 10);
+
+const PAPER = "#FBF9F4", OX = "#8A3033", BLUE = "#A9C7D8", INK = "#2B2724";
+
+function rules(inset) {
+  let s = "";
+  for (let y = 56; y < 490; y += 56)
+    s += `<rect x="${inset}" y="${y}" width="${512 - inset * 2}" height="7" rx="3.5" fill="${BLUE}"/>`;
+  return s;
+}
+const M = (cx, by, fs) =>
+  `<text x="${cx}" y="${by}" font-family="Fraunces" font-weight="700" font-size="${fs}"
+     fill="${INK}" text-anchor="middle">M</text>`;
+
+let inner;
+if (variant === "maskable") {
+  // Full-bleed background; band and M pulled inside the 80% safe zone so an
+  // aggressive circular mask can't shave either of them.
+  inner = `<rect width="512" height="512" fill="${PAPER}"/>`
+        + rules(20)
+        + `<rect x="72" y="0" width="112" height="512" fill="${OX}"/>`
+        + M(320, 350, 250);
+} else {
+  inner = `<rect width="512" height="512" rx="115" fill="${PAPER}"/>`
+        + rules(20)
+        + `<rect x="0" y="0" width="112" height="512" fill="${OX}"/>`
+        + M(320, 368, 300);
+}
+
+document.body.insertAdjacentHTML("beforeend",
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">
+     <defs><clipPath id="r"><rect width="512" height="512" rx="${variant === "maskable" ? 0 : 115}"/></clipPath></defs>
+     <g clip-path="url(#r)">${inner}</g>
+   </svg>`);
+</script>
