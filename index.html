@@ -8,7 +8,7 @@
   <!-- PWA wiring: the manifest makes the app installable, theme-color paints the title bar -->
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#8A3033" />
-  <link rel="apple-touch-icon" href="icons/icon-192-v2.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192-v3.png" />
 
   <!-- Type: Fraunces (characterful serif, used for the word specimen) + Inter (clean UI) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -99,6 +99,10 @@
     /* The margin rule: the red line down the left of a ruled page, which is
        also what the app icon is built on. Purely decorative, so it's a
        pseudo-element -- nothing for a screen reader to read out. */
+    /* The gap is deliberately tight -- 6px, not the 12px this started at. The
+       rule and the M are one mark, the same way they are in the app icon; give
+       them room to breathe and the rule stops reading as a margin and starts
+       reading as a stray bit of punctuation. */
     .brand::before {
       content: "";
       display: inline-block;
@@ -106,24 +110,31 @@
       height: 0.95em;
       border-radius: 2.5px;
       background: var(--oxblood);
-      margin-right: 12px;
+      margin-right: 6px;
       vertical-align: -0.12em;
     }
-    /* The one mark: a dog-eared page corner, the reader's own way of saying
-       "come back to this" — which is the whole app in one gesture. Kept at
-       text size beside the wordmark rather than blown up as a logo. */
-    /* Now a real <button> that opens the FAQ, not an inert glyph -- so it has to
-       undo the global button rule, which paints every button oxblood-on-paper. */
-    .dogear {
-      display: inline-flex; vertical-align: -2px; margin-left: 8px;
-      background: transparent; color: var(--ink-soft);
-      border: none; padding: 2px; border-radius: 6px;
-    }
-    .dogear:hover, .dogear:focus-visible,
-    .dogear[aria-expanded="true"] { background: transparent; color: var(--oxblood); }
     .tagline { margin: 4px 0 0; color: var(--ink-soft); font-size: 14px; }
 
-    /* ---- FAQ panel, opened from the dog-ear ---- */
+    /* ---- The footer: the way into the FAQ and the feedback form ---- */
+    .page-foot {
+      margin: 34px 0 0; padding-top: 14px;
+      border-top: 1px solid var(--line);
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px;
+    }
+    /* Real <button>s, so they undo the global rule that paints every button
+       oxblood-on-paper. */
+    .foot-link {
+      background: transparent; color: var(--ink-soft);
+      border: none; padding: 4px 2px; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+    }
+    .foot-link:hover, .foot-link:focus-visible,
+    .foot-link[aria-expanded="true"] { background: transparent; color: var(--oxblood); }
+    .foot-sep { color: var(--line); }
+    .foot-link[hidden] { display: none; }
+
+    /* ---- FAQ panel, opened from the footer ---- */
     .faq {
       margin: 18px 0 0;
       background: var(--paper-2);
@@ -142,6 +153,32 @@
     .faq dt { font-family: "Fraunces", serif; font-weight: 600; font-size: 15px; margin: 0 0 3px; }
     .faq dd { margin: 0 0 13px; font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
     .faq dd:last-child { margin-bottom: 0; }
+
+    /* ---- Feedback panel, same shape as the FAQ so the footer opens two
+           things that visibly belong together ---- */
+    .feedback {
+      margin: 18px 0 0;
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px 20px 20px;
+    }
+    .feedback-title { font-family: "Fraunces", serif; font-size: 19px; font-weight: 600; margin: 0 0 6px; }
+    .feedback-lede { margin: 0 0 14px; font-size: 13.5px; line-height: 1.55; color: var(--ink-soft); }
+    .feedback-label {
+      display: block; margin: 0 0 6px; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
+    }
+    .feedback textarea {
+      width: 100%; box-sizing: border-box; resize: vertical;
+      font: inherit; font-size: 15px; line-height: 1.5;
+      padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px;
+      background: var(--paper); color: var(--ink);
+    }
+    .feedback textarea:focus-visible { outline: 2px solid var(--oxblood); outline-offset: 1px; }
+    .feedback-note { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
+    .feedback-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+    #feedback-status { margin: 12px 0 0; }
 
     /* Account + theme chrome, out of the way in the masthead corner. */
     .header-actions {
@@ -811,6 +848,13 @@
     /* The pending card's own status line, so an approve result doesn't have to
        borrow the invite list's. */
     .admin-req-status { margin: 14px 0 0; color: var(--ink-soft); font-size: 14px; word-break: break-all; }
+    /* The clipboard fallback: a multi-line message, so it has to keep its line
+       breaks and be selectable by hand. */
+    .admin-req-copyout {
+      white-space: pre-wrap; word-break: normal; user-select: all;
+      background: var(--paper); border: 1px solid var(--line);
+      border-radius: 10px; padding: 10px 12px; line-height: 1.5;
+    }
     .admin-req-status.error { color: var(--oxblood); }
 
     /* ---- Admin: invite links ---- */
@@ -949,121 +993,11 @@
         <button id="sign-out" type="button" class="btn-signout" hidden>Sign out</button>
         <button id="theme-toggle" type="button" class="btn-theme" aria-label="Theme: System. Tap to change."></button>
       </div>
-      <h1 class="brand">Margin<span class="dot">.</span><button id="faq-toggle" type="button"
-        class="dogear" aria-expanded="false" aria-controls="faq-panel"
-        aria-label="About Margin — common questions">
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-          <path d="M3.5 3.5h11.5L20.5 9v11.5h-17z" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-          <path d="M15 3.5V9h5.5z" fill="var(--oxblood)"/>
-        </svg>
-      </button></h1>
+      <h1 class="brand">Margin<span class="dot">.</span></h1>
       <p class="tagline">Catch a word mid-page.</p>
       <button id="install" type="button" class="btn-install" hidden>Install Margin</button>
     </header>
 
-    <!-- Opened from the dog-ear in the masthead. Deliberately sits outside
-         #app-content so it's readable signed out too -- someone deciding
-         whether to ask for access can see what leaves their device first. -->
-    <section id="faq-panel" class="faq" hidden>
-      <p class="faq-intro">Short answers on how Margin works, and what it does with your
-        things. Installing it is covered in the <a href="guide.html">guide</a>.</p>
-
-      <div class="faq-group">
-        <h3>Looking a word up</h3>
-        <dl>
-          <dt>Where do the definitions come from?</dt>
-          <dd>A free public dictionary API built on Wiktionary's data. No account or key
-            needed, and it's what every lookup uses by default.</dd>
-
-          <dt>Why does one word show several meanings?</dt>
-          <dd>Because most words have several. Margin shows every sense, grouped by part of
-            speech, and lets you save the one that matches how you actually saw it used
-            rather than guessing on your behalf.</dd>
-
-          <dt>What is the AI tab?</dt>
-          <dd>An optional second opinion. It asks an AI model for a definition written for
-            whatever book is in your “Reading” field, so an ambiguous word gets the sense
-            that fits. It only runs when you open the tab, never on every lookup.</dd>
-
-          <dt>The word wasn't found — is that a dead end?</dt>
-          <dd>No. The card still appears with the AI tab a tap away, which is usually the
-            answer for names, slang and very new words. If you're offline you'll get a
-            “Save for later” button instead.</dd>
-
-          <dt>Can I say the word instead of typing it?</dt>
-          <dd>Yes — the mic button uses your device's own speech recognition.</dd>
-        </dl>
-      </div>
-
-      <div class="faq-group">
-        <h3>Reading off the page</h3>
-        <dl>
-          <dt>What does the scan button do?</dt>
-          <dd>Takes a photo of the page — or uses one you already have — and lets you drag a
-            box around the part you care about. Every word in it becomes tappable, appearing
-            as they're recognised.</dd>
-
-          <dt>What happens to the photo?</dt>
-          <dd>It's sent to Google's Gemini to be read back as text, then discarded. Margin
-            doesn't keep photos.</dd>
-
-          <dt>Can I scan a book instead of typing its title?</dt>
-          <dd>Yes. Scan the cover and it fills in the title, author and ISBN; the cover
-            picture comes from Open Library. There's a manual entry fallback if the cover is
-            damaged or too shiny to read.</dd>
-
-          <dt>What is “the line from your book”?</dt>
-          <dd>An optional field for the actual sentence you met the word in — which is a
-            different thing from the dictionary's own example sentence.</dd>
-        </dl>
-      </div>
-
-      <div class="faq-group">
-        <h3>Your words</h3>
-        <dl>
-          <dt>Where are my saved words kept?</dt>
-          <dd>In your own account, so they follow you from your phone to any other device
-            you sign in on.</dd>
-
-          <dt>Can anyone else see them?</dt>
-          <dd>No. Every saved word is tied to your account, and the database enforces that
-            itself rather than trusting the app to.</dd>
-
-          <dt>What does “Learned it” do?</dt>
-          <dd>Marks a word as one you've got. It stays in your list, greyed out, and stops
-            coming up in practice.</dd>
-
-          <dt>How does practice work?</dt>
-          <dd>Flashcards you tap to flip, or a quick multiple-choice quiz. Both are built
-            from your own saved words — no AI, no connection needed. Filter to one book
-            first and you'll practise only that book. The quiz needs at least four saved
-            words to have enough wrong answers to offer.</dd>
-        </dl>
-      </div>
-
-      <div class="faq-group">
-        <h3>Offline, updates and access</h3>
-        <dl>
-          <dt>Does it work without a connection?</dt>
-          <dd>Your saved words and practice do, from a copy kept on the device. Looking up a
-            new word needs the network — but you can queue one with “Save for later” and it
-            resolves itself once you're back online.</dd>
-
-          <dt>Why did a “new version” bar appear?</dt>
-          <dd>The app updated itself in the background. Tapping Refresh loads the new one;
-            nothing is lost either way.</dd>
-
-          <dt>Why is signing in invite-only?</dt>
-          <dd>It's a personal project rather than a service. If you have the link but no
-            account yet, the app will offer to ask on your behalf.</dd>
-
-          <dt>The sign-in email never arrived.</dt>
-          <dd>Check your spam folder. Margin's mail comes from an ordinary personal Gmail
-            account, which is often enough for it to be filtered the first time. Mark it
-            “Not spam” once and the rest arrive normally.</dd>
-        </dl>
-      </div>
-    </section>
 
     <!-- Signed-out state: only this shows. Signed-in state: only #app-content shows. -->
     <section id="auth-section" class="auth-section" hidden>
@@ -1198,12 +1132,164 @@
       </section>
     </div>
 
+    <!-- Opened from the FAQ button in the footer. Deliberately sits outside
+         #app-content so it's readable signed out too -- someone deciding
+         whether to ask for access can see what leaves their device first. -->
+    <section id="faq-panel" class="faq" hidden>
+      <p class="faq-intro">Short answers on how Margin works, and what it does with your
+        things.</p>
+
+      <div class="faq-group">
+        <h3>What this is</h3>
+        <dl>
+          <dt>What is Margin?</dt>
+          <dd>A place to put the words you meet while reading. You're on a page, you hit a
+            word you don't know, and by the time you've found a dictionary the sentence has
+            gone cold — Margin is the shortest path from that word to its meaning, and it
+            keeps the word afterwards, filed under the book you found it in. Type it, say
+            it, or photograph the page and tap the word. Later, the words you've kept turn
+            into flashcards and a quiz. It's a small personal project, not a service, which
+            is why it's invite-only and why there are no accounts to manage, no adverts and
+            nothing to pay.</dd>
+        </dl>
+      </div>
+
+      <div class="faq-group">
+        <h3>Looking a word up</h3>
+        <dl>
+          <dt>Where do the definitions come from?</dt>
+          <dd>A free public dictionary API built on Wiktionary's data. No account or key
+            needed, and it's what every lookup uses by default.</dd>
+
+          <dt>Why does one word show several meanings?</dt>
+          <dd>Because most words have several. Margin shows every sense, grouped by part of
+            speech, and lets you save the one that matches how you actually saw it used
+            rather than guessing on your behalf.</dd>
+
+          <dt>What is the AI tab?</dt>
+          <dd>An optional second opinion. It asks an AI model for a definition written for
+            whatever book is in your “Reading” field, so an ambiguous word gets the sense
+            that fits. It only runs when you open the tab, never on every lookup.</dd>
+
+          <dt>The word wasn't found — is that a dead end?</dt>
+          <dd>No. The card still appears with the AI tab a tap away, which is usually the
+            answer for names, slang and very new words. If you're offline you'll get a
+            “Save for later” button instead.</dd>
+
+          <dt>Can I say the word instead of typing it?</dt>
+          <dd>Yes — the mic button uses your device's own speech recognition.</dd>
+        </dl>
+      </div>
+
+      <div class="faq-group">
+        <h3>Reading off the page</h3>
+        <dl>
+          <dt>What does the scan button do?</dt>
+          <dd>Takes a photo of the page — or uses one you already have — and lets you drag a
+            box around the part you care about. Every word in it becomes tappable, appearing
+            as they're recognised.</dd>
+
+          <dt>What happens to the photo?</dt>
+          <dd>It's sent to Google's Gemini to be read back as text, then discarded. Margin
+            doesn't keep photos.</dd>
+
+          <dt>Can I scan a book instead of typing its title?</dt>
+          <dd>Yes. Scan the cover and it fills in the title, author and ISBN; the cover
+            picture comes from Open Library. There's a manual entry fallback if the cover is
+            damaged or too shiny to read.</dd>
+
+          <dt>What is “the line from your book”?</dt>
+          <dd>An optional field for the actual sentence you met the word in — which is a
+            different thing from the dictionary's own example sentence.</dd>
+        </dl>
+      </div>
+
+      <div class="faq-group">
+        <h3>Your words</h3>
+        <dl>
+          <dt>Where are my saved words kept?</dt>
+          <dd>In your own account, so they follow you from your phone to any other device
+            you sign in on.</dd>
+
+          <dt>Can anyone else see them?</dt>
+          <dd>No. Every saved word is tied to your account, and the database enforces that
+            itself rather than trusting the app to.</dd>
+
+          <dt>What does “Learned it” do?</dt>
+          <dd>Marks a word as one you've got. It stays in your list, greyed out, and stops
+            coming up in practice.</dd>
+
+          <dt>How does practice work?</dt>
+          <dd>Flashcards you tap to flip, or a quick multiple-choice quiz. Both are built
+            from your own saved words — no AI, no connection needed. Filter to one book
+            first and you'll practise only that book. The quiz needs at least four saved
+            words to have enough wrong answers to offer.</dd>
+        </dl>
+      </div>
+
+      <div class="faq-group">
+        <h3>Offline, updates and access</h3>
+        <dl>
+          <dt>Does it work without a connection?</dt>
+          <dd>Your saved words and practice do, from a copy kept on the device. Looking up a
+            new word needs the network — but you can queue one with “Save for later” and it
+            resolves itself once you're back online.</dd>
+
+          <dt>Why did a “new version” bar appear?</dt>
+          <dd>The app updated itself in the background. Tapping Refresh loads the new one;
+            nothing is lost either way.</dd>
+
+          <dt>Why is signing in invite-only?</dt>
+          <dd>It's a personal project rather than a service. If you have the link but no
+            account yet, the app will offer to ask on your behalf.</dd>
+
+          <dt>The sign-in email never arrived.</dt>
+          <dd>Check your spam folder. Margin's mail comes from an ordinary personal Gmail
+            account, which is often enough for it to be filtered the first time. Mark it
+            “Not spam” once and the rest arrive normally.</dd>
+        </dl>
+      </div>
+    </section>
+
+    <!-- Feedback, opened from the footer. Signed-in only: it posts through an
+         Edge Function that trusts the caller's Supabase token for identity, so
+         there's nothing to send if nobody is signed in -- and a stranger who
+         can't get in has the request-access form for that instead. -->
+    <section id="feedback-panel" class="feedback" hidden>
+      <h2 class="feedback-title">Tell me what you think</h2>
+      <p class="feedback-lede">Something broken, something missing, or something that just
+        feels wrong to use — all of it is useful. It comes straight to me.</p>
+      <form id="feedback-form">
+        <label class="feedback-label" for="feedback-text">Your message</label>
+        <textarea id="feedback-text" rows="5" maxlength="2000" required
+          placeholder="What happened, or what would you change?"></textarea>
+        <p class="feedback-note">Sent with your email address, so I can reply, and your
+          browser details, so I can reproduce a bug.</p>
+        <div class="feedback-actions">
+          <button type="submit" id="feedback-send">Send</button>
+          <button type="button" id="feedback-cancel" class="btn-signout">Cancel</button>
+        </div>
+      </form>
+      <p id="feedback-status" class="auth-status" hidden></p>
+    </section>
+
     <!-- Private admin route: only reachable via #admin, never linked from the
          normal UI. The real access control is the allowed_emails RLS
          policies in Supabase (this admin's auth.uid() hardcoded there,
          see supabase/sql/admin-allowed-emails-rls.sql) -- this section's own
          "not authorized" check is just a clean experience, not the boundary. -->
     <section id="admin-section" class="admin-section" hidden></section>
+
+    <!-- The quiet end of the page. The FAQ used to hang off a dog-ear glyph
+         beside the wordmark; down here it costs the masthead nothing and sits
+         where people already look for help. -->
+    <footer class="page-foot">
+      <button id="faq-toggle" type="button" class="foot-link"
+        aria-expanded="false" aria-controls="faq-panel">FAQ</button>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <button id="feedback-toggle" type="button" class="foot-link" hidden
+        aria-expanded="false" aria-controls="feedback-panel">Send feedback</button>
+    </footer>
   </div>
 
   <!-- Supabase JS v2, loaded before our own script so `supabase.createClient` is ready. -->
@@ -1243,6 +1329,12 @@
       $("auth-section").hidden = false;
       $("sign-out").hidden = true;
       $("admin-link").hidden = true;
+      // Feedback needs a signed-in identity to post under, so it's hidden here.
+      // The FAQ beside it stays: someone deciding whether to ask for access
+      // should be able to read what the app does with their things first.
+      $("feedback-toggle").hidden = true;
+      $("feedback-panel").hidden = true;
+      $("feedback-toggle").setAttribute("aria-expanded", "false");
     }
 
     function showSignedIn(session) {
@@ -1252,6 +1344,7 @@
       // Sign out lives in the masthead now, outside #app-content, so it has
       // to be shown/hidden explicitly with the signed-in state.
       $("sign-out").hidden = false;
+      $("feedback-toggle").hidden = false;
       // The way into the admin route, for the one account that has one. Anyone
       // else signed in never sees it (and gets nothing from the hash anyway --
       // the RLS policies on allowed_emails/access_requests are the boundary).
@@ -2547,13 +2640,116 @@
     });
     applySavedOpenState();
 
-    // The FAQ behind the dog-ear. Unlike the saved list, open/closed is NOT
-    // remembered: it's reference material you dip into and close again, so it
-    // should never be sitting open above the word field on the next visit.
+    // The two panels the footer opens. Unlike the saved list, open/closed is
+    // NOT remembered: both are things you dip into and close again, so neither
+    // should be sitting open on the next visit.
+    //
+    // They're mutually exclusive. Both live at the bottom of the page, so
+    // opening one while the other is open would push it around under the
+    // reader's thumb; and having asked for the FAQ or the feedback box, nobody
+    // wants both at once.
+    function toggleFootPanel(toggleId, panelId, otherToggleId, otherPanelId) {
+      const opening = $(panelId).hidden;
+      if (opening && otherPanelId) {
+        $(otherPanelId).hidden = true;
+        $(otherToggleId).setAttribute("aria-expanded", "false");
+      }
+      $(panelId).hidden = !opening;
+      $(toggleId).setAttribute("aria-expanded", String(opening));
+      // The footer is the last thing on the page, so a panel opening above it
+      // opens off-screen unless we go there.
+      if (opening) $(panelId).scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     $("faq-toggle").addEventListener("click", () => {
-      const opening = $("faq-panel").hidden;
-      $("faq-panel").hidden = !opening;
-      $("faq-toggle").setAttribute("aria-expanded", String(opening));
+      toggleFootPanel("faq-toggle", "faq-panel", "feedback-toggle", "feedback-panel");
+    });
+
+    $("feedback-toggle").addEventListener("click", () => {
+      toggleFootPanel("feedback-toggle", "feedback-panel", "faq-toggle", "faq-panel");
+      if (!$("feedback-panel").hidden) $("feedback-text").focus();
+    });
+
+    // Which build the sender is actually running -- the single most useful
+    // thing on a bug report, since an installed PWA can be a version or two
+    // behind. Read out of CacheStorage rather than kept as its own constant,
+    // so it can never drift from sw.js's CACHE the way a second hardcoded
+    // version string would.
+    async function appShellVersion() {
+      try {
+        const keys = await caches.keys();
+        return keys.find((k) => k.startsWith("margin-shell-")) || "unknown";
+      } catch {
+        return "unknown";
+      }
+    }
+
+    function closeFeedbackPanel() {
+      $("feedback-panel").hidden = true;
+      $("feedback-toggle").setAttribute("aria-expanded", "false");
+    }
+
+    $("feedback-cancel").addEventListener("click", closeFeedbackPanel);
+
+    // Posting goes through the send-feedback Edge Function rather than straight
+    // into the table, for the same reason approve-access exists: the half that
+    // matters (actually mailing me) can't happen in a browser, and the function
+    // takes the sender's identity from the verified token instead of anything
+    // the client claims.
+    $("feedback-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const status = $("feedback-status");
+      const message = $("feedback-text").value.trim();
+      if (!message) return;
+      if (!currentSession) {
+        status.hidden = false;
+        status.className = "auth-status error";
+        status.textContent = "You'll need to be signed in to send this.";
+        return;
+      }
+
+      const btn = $("feedback-send");
+      btn.disabled = true;
+      const originalLabel = btn.textContent;
+      btn.textContent = "Sending…";
+      status.hidden = true;
+
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/send-feedback`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${currentSession.access_token}`,
+          },
+          body: JSON.stringify({
+            message,
+            // Sent so a bug report arrives with enough to reproduce it. Named
+            // in the form's own note above rather than collected quietly.
+            user_agent: navigator.userAgent,
+            app_version: await appShellVersion(),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Couldn't send that (${res.status}).`);
+
+        $("feedback-text").value = "";
+        status.hidden = false;
+        status.className = "auth-status";
+        status.textContent = "Sent — thank you. I read all of these.";
+        setTimeout(() => {
+          closeFeedbackPanel();
+          status.hidden = true;
+        }, 2200);
+      } catch (err) {
+        status.hidden = false;
+        status.className = "auth-status error";
+        status.textContent = navigator.onLine
+          ? (err.message || "Couldn't send that just now.")
+          : "You're offline — this one needs a connection.";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
     });
 
     // Re-reads everything from storage and redraws the filter dropdown + the list.
@@ -3987,6 +4183,11 @@
 
       $("auth-section").hidden = true;
       $("app-content").hidden = true;
+      // Both footer panels sit above this section, so leaving one open would
+      // stack reference material on top of the admin screen.
+      $("faq-panel").hidden = true;
+      $("faq-toggle").setAttribute("aria-expanded", "false");
+      closeFeedbackPanel();
 
       if (session.user.id !== ADMIN_USER_ID) {
         $("admin-section").innerHTML =
@@ -4149,6 +4350,10 @@
 
             <h3>Invite links</h3>
             <ul>
+              <li><strong>“Copy invite” copies a message, not just a URL</strong> — what Margin
+                is, the link, the spam warning, and a nudge towards the feedback button. Paste
+                the whole thing into WhatsApp; it's meant to be sent as it stands. Don't trim the
+                spam line: it's the only mitigation there is for the filtering problem below.</li>
               <li><strong>Max uses</strong> is a hard cap, counted properly — two people
                 claiming the last use at the same moment can't both get in. Leave it blank for
                 unlimited, but see the last point.</li>
@@ -4201,11 +4406,55 @@
       return location.origin + location.pathname + "?i=" + encodeURIComponent(code);
     }
 
+    // What actually goes on the clipboard. A bare URL pasted into WhatsApp
+    // tells the person nothing -- not what it is, not that it's from me, not
+    // that it's meant for them -- so the link travels with a real message.
+    //
+    // Written to be sent unedited. Every line earns its place:
+    //
+    //   * "I've built" leads, because the strongest thing in a friends-and-
+    //     family invite is that it comes from someone they know. "A new
+    //     vocabulary app" is third person and reads like an advert.
+    //   * "the words you meet while reading", not "words you don't know" --
+    //     no reason to open by telling the reader what they lack.
+    //   * "scan" is the word on the button, so the promise matches the UI.
+    //   * The spam line is NOT padding, and must not be dropped. Invite mail
+    //     goes out through a personal Gmail account and is filtered often
+    //     enough that warning people is the entire mitigation available -- it
+    //     is DKIM-signed already, so there is nothing left to fix in code.
+    //     Without this line the failure comes back as "I never got the email".
+    //   * The feedback ask is only honest now that the footer has a feedback
+    //     button; it used to point nowhere.
+    //
+    // Bullets and emoji are deliberate here and deliberately absent from the
+    // invite EMAIL (supabase/email-templates/invite.html), which is written flat
+    // and prose-heavy because that structure scores badly with spam filters.
+    // WhatsApp isn't filtered, so it can be scannable.
+    function inviteMessageFor(code) {
+      return [
+        "Hey! 👋",
+        "",
+        "I've built a reading app called Margin — it's for the words you meet while reading. 📚",
+        "",
+        "🔹 Type, speak, or scan the page and tap any word for the meaning",
+        "🔹 Every word is kept under the book you found it in, on any device you sign in on",
+        "",
+        "Have a go: " + inviteLinkFor(code),
+        "",
+        "One thing: the sign-in email usually lands in spam the first time. Mark it “Not spam” "
+          + "and the rest arrive normally.",
+        "",
+        "Would love to hear what you think — there's a feedback button at the bottom of the app. 🙌",
+      ].join("\n");
+    }
+
     function renderCodesCard(codes) {
       return `
         <div class="admin-card">
           <h2 class="admin-title">Invite links</h2>
-          <p class="admin-lede">A link that lets someone in without waiting for you. Send it in the same message as the app link.</p>
+          <p class="admin-lede">A link that lets someone in without waiting for you. “Copy invite”
+            puts the link on your clipboard inside a short message you can paste straight into
+            WhatsApp — what Margin is, and where the sign-in email will probably hide.</p>
           <form id="code-add-form" class="code-add-form">
             <input id="code-value" type="text" placeholder="code" maxlength="40" required value="${escapeHtml(suggestCode())}" />
             <input id="code-label" type="text" placeholder="Who's it for? (optional)" maxlength="60" />
@@ -4244,7 +4493,7 @@
                   }</span>
                 </span>
                 <span class="admin-req-actions">
-                  <button type="button" class="code-copy" data-code="${escapeHtml(row.code)}">Copy link</button>
+                  <button type="button" class="code-copy" data-code="${escapeHtml(row.code)}">Copy invite</button>
                   ${st.spent ? "" : `<button type="button" class="saved-delete code-disable" data-code="${escapeHtml(row.code)}">Turn off</button>`}
                 </span>
               </li>`;
@@ -4535,19 +4784,20 @@
 
       $("admin-section").querySelectorAll(".code-copy").forEach((btn) => {
         btn.addEventListener("click", async () => {
-          const link = inviteLinkFor(btn.dataset.code);
+          const message = inviteMessageFor(btn.dataset.code);
+          const label = btn.textContent;
           try {
-            await navigator.clipboard.writeText(link);
+            await navigator.clipboard.writeText(message);
             btn.textContent = "Copied";
-            setTimeout(() => { btn.textContent = "Copy link"; }, 1500);
+            setTimeout(() => { btn.textContent = label; }, 1500);
           } catch {
             // Clipboard access needs a secure context and can still be refused.
-            // Showing the link is a worse experience than copying it, but it's
-            // a far better one than a button that silently does nothing.
+            // Showing the message is a worse experience than copying it, but
+            // it's a far better one than a button that silently does nothing.
             const status = $("code-status");
             status.hidden = false;
-            status.className = "admin-req-status";
-            status.textContent = link;
+            status.className = "admin-req-status admin-req-copyout";
+            status.textContent = message;
           }
         });
       });

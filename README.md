@@ -79,6 +79,7 @@ index.html ──────────────► dictionaryapi.dev      
      │                     Edge Functions:            scoped to the signed-in account
      │                       approve-access
      │                       redeem-invite
+     │                       send-feedback
      │
      └───────────────────► IndexedDB                  local mirror + offline capture queue
 ```
@@ -110,6 +111,7 @@ Deliberately short list, and each item only happens because you asked for it:
 | A photo of a page or book cover | Google Gemini, via the Worker | Only when you scan |
 | A scanned book's ISBN | Open Library | To fetch cover art |
 | Your saved words | Supabase, private to your account | When you save |
+| Feedback text, your email, your browser | Supabase, then my inbox | Only if you use Send feedback |
 
 Photos are read and discarded — Margin doesn't store them. There's no analytics and no
 third-party tracking of any kind.
@@ -124,7 +126,7 @@ guide.html                  install + testing guide for testers
 icons/                      app icons, plus icon-source.html which generates them
 worker/                     Cloudflare Worker — the LLM proxy
 supabase/sql/               schema, RLS policies and functions, run by hand in the SQL editor
-supabase/functions/         Edge Functions (approve-access, redeem-invite)
+supabase/functions/         Edge Functions (approve-access, redeem-invite, send-feedback)
 supabase/email-templates/   tracked copies of the auth emails (the dashboard is the source of truth)
 ```
 

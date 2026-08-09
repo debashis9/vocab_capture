@@ -5,50 +5,57 @@
 </style>
 <body>
 <script>
-// Margin app icon — candidate I: oxblood margin band on a ruled page,
-// with an ink Fraunces M sitting in the writing area.
+// Margin app icon — an oxblood margin rule down the left of a page, with a
+// Fraunces M standing in the writing area. Same serif texture as the old "V"
+// icon this replaced; the V simply became an M, and the margin rule was added
+// beside it.
+//
+// Two deliberate properties, both learned the hard way:
+//   * The M is optically centred on the WHOLE tile, not on the paper area left
+//     over beside the band. Centring it in the leftover area pushes it right
+//     and opens a gap that reads as a mistake.
+//   * The band always runs flush to x=0. Insetting it to satisfy the maskable
+//     safe zone is what once left a strip of bare paper down its left edge on
+//     Android, since Android uses the maskable icon for the home screen.
+//
 // ?v=any|maskable   &s=<pixel size>
 const q = new URLSearchParams(location.search);
 const variant = q.get("v") || "any";
 const size = parseInt(q.get("s") || "512", 10);
 
-const PAPER = "#FBF9F4", OX = "#8A3033", BLUE = "#A9C7D8", INK = "#2B2724";
+const PAPER = "#FBF9F4", OX = "#8A3033";
 
-function rules(inset) {
-  let s = "";
-  for (let y = 56; y < 490; y += 56)
-    s += `<rect x="${inset}" y="${y}" width="${512 - inset * 2}" height="7" rx="3.5" fill="${BLUE}"/>`;
-  return s;
-}
-const M = (cx, by, fs) =>
-  `<text x="${cx}" y="${by}" font-family="Fraunces" font-weight="700" font-size="${fs}"
-     fill="${INK}" text-anchor="middle">M</text>`;
-
-let inner;
-if (variant === "maskable") {
-  // Full-bleed background, and the M pulled inside the 80% safe zone so an
-  // aggressive circular mask can't shave it.
-  //
-  // The band runs flush to the left edge and is made WIDER instead of being
-  // inset. Insetting it (x=72) kept it inside the safe zone but left a strip
-  // of ruled paper to its left -- and since Android uses the maskable icon for
-  // the home screen, that strip is what actually shipped. Flush + wide means
-  // every mask shape, from square to circle, crops into the band itself and
-  // never reveals paper beside it.
-  inner = `<rect width="512" height="512" fill="${PAPER}"/>`
-        + rules(20)
-        + `<rect x="0" y="0" width="150" height="512" fill="${OX}"/>`
-        + M(330, 345, 240);
-} else {
-  inner = `<rect width="512" height="512" rx="115" fill="${PAPER}"/>`
-        + rules(20)
-        + `<rect x="0" y="0" width="112" height="512" fill="${OX}"/>`
-        + M(320, 368, 300);
+// The whole composition, as one set of numbers. The maskable variant is the
+// same drawing scaled to 0.8 about the centre so it survives an aggressive
+// circular crop -- keeping it a scale rather than a re-layout is what stops the
+// two icons drifting apart the next time either is touched.
+function composition(scale) {
+  const at = (x) => 256 + (x - 256) * scale;
+  return {
+    // The band's RIGHT edge is what scales; its left edge stays pinned at x=0
+    // rather than scaling to 51, which is the whole point above.
+    band: at(96),
+    mSize: 280 * scale,
+    mCx: at(256),              // dead centre either way
+    mBy: at(358),
+  };
 }
 
+function art(maskable) {
+  const c = composition(maskable ? 0.8 : 1);
+  const bg = maskable
+    ? `<rect width="512" height="512" fill="${PAPER}"/>`
+    : `<rect width="512" height="512" rx="115" fill="${PAPER}"/>`;
+  return bg
+    + `<rect x="0" y="0" width="${c.band}" height="512" fill="${OX}"/>`
+    + `<text x="${c.mCx}" y="${c.mBy}" font-family="Fraunces" font-weight="700"
+         font-size="${c.mSize}" fill="${OX}" text-anchor="middle">M</text>`;
+}
+
+const maskable = variant === "maskable";
 document.body.insertAdjacentHTML("beforeend",
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">
-     <defs><clipPath id="r"><rect width="512" height="512" rx="${variant === "maskable" ? 0 : 115}"/></clipPath></defs>
-     <g clip-path="url(#r)">${inner}</g>
+     <defs><clipPath id="r"><rect width="512" height="512" rx="${maskable ? 0 : 115}"/></clipPath></defs>
+     <g clip-path="url(#r)">${art(maskable)}</g>
    </svg>`);
 </script>
