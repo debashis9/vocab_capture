@@ -67,18 +67,25 @@
   }
   .intro-card p { margin: 0 0 12px; }
   .intro-card p:last-child { margin-bottom: 0; }
-  .disclaimers { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 10px; }
+  .disclaimers { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 12px; }
+  /* Block, with the bullet positioned — not display:flex. Same trap as
+     ol.steps above: a flex li turns every text run, every <strong> and the
+     nested list into separate columns. */
   .disclaimers li {
-    display: flex; gap: 10px; align-items: flex-start;
-    font-size: 14.5px; color: var(--ink-soft); line-height: 1.5;
+    position: relative; padding-left: 16px;
+    font-size: 14.5px; color: var(--ink-soft); line-height: 1.55;
   }
   .disclaimers li::before {
     content: "";
-    flex: 0 0 auto;
-    width: 6px; height: 6px; margin-top: 7px;
+    position: absolute; left: 0; top: 8px;
+    width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--oxblood);
   }
+  .disclaimers strong { color: var(--ink); font-weight: 600; }
+  /* What leaves the device: one line each, so it can be scanned rather than read. */
+  .leaves { list-style: none; margin: 8px 0 8px; padding: 0; display: grid; gap: 5px; }
+  .leaves li { font-size: 13.5px; line-height: 1.45; }
 
   /* ---- install cards ---- */
   .platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -165,13 +172,26 @@
   </section>
 
   <section class="section intro-card">
-    <p>Hi — thanks for agreeing to poke at this. Margin is something I've been building myself: when you hit a word you don't know in a book, you type it, say it, or point your camera at the page, get a definition, and keep it tagged to that book so you can look back later.</p>
-    <p>A few honest things before you install it:</p>
+    <p>Thanks for poking at this. Margin is something I've been building: hit a word you don't
+      know in a book, catch it, and keep it tagged to that book.</p>
+    <p>Four honest things first:</p>
     <ul class="disclaimers">
-      <li>This is a personal project, not a finished product — expect rough edges, and things may look different next week as I keep working on it.</li>
-      <li>You'll sign in with just your email — a link we send you, no password. Margin is invite-only, so if your address isn't on the list yet the app won't just fail at you: it'll offer to ask on your behalf. Leave your name and you'll get an email once I've added you. Once you're in, your saved words follow your account across devices.</li>
-      <li>It's free, no payment details — ever. Signing in is just to keep your list yours and separate from anyone else testing this.</li>
-      <li>Your saved words are stored privately under your account, not shared with other testers. Word lookups go to a free public dictionary by default. Three other things leave your device, and only ever because you asked for them: the optional "AI" tab sends that word and whatever book you typed to Google's Gemini; scanning a page or a book cover sends that photo to the same place to be read back as text; and a scanned book's ISBN goes to Open Library to fetch its cover picture. Nothing else about you or your device goes along with any of it, and Margin doesn't keep the photos — they're read and thrown away. The one other thing that leaves is the <strong>Send feedback</strong> box at the bottom of the app: if you use it, your message comes to me along with your email address, so I can reply, and your browser details, so I can reproduce a bug.</li>
+      <li><strong>It's a personal project, not a product.</strong> Expect rough edges, and
+        expect it to look different next week.</li>
+      <li><strong>Sign in is an emailed link, no password.</strong> Margin is invite-only — if
+        you're not on the list yet, the app offers to ask for you.</li>
+      <li><strong>Free, no payment details, ever.</strong> Signing in only keeps your list
+        yours.</li>
+      <li><strong>What leaves your device</strong>, and only ever because you asked:
+        <ul class="leaves">
+          <li>the word you look up → a free public dictionary</li>
+          <li>the word and your book title → Google's Gemini, if you open the AI tab</li>
+          <li>a page or cover photo → Google's Gemini, to be read as text and discarded</li>
+          <li>a scanned book's ISBN → Open Library, for the cover picture</li>
+          <li>anything you write in <strong>Send feedback</strong> → me, with your email so I
+            can reply and your browser so I can reproduce a bug</li>
+        </ul>
+        Your saved words stay private to your account. Margin keeps no photos.</li>
     </ul>
   </section>
 
@@ -213,27 +233,47 @@
 
   <section class="section">
     <h2>Trying it out</h2>
-    <p class="section-lede">Once it's on your home screen, open it like any app — it'll fill the screen with no browser bar around it.</p>
-    <p>First time in, it'll ask for your email. If you've already been added — which you have, if an email invited you here — a sign-in link lands in your inbox. Tap it, the app reopens signed in, and you won't need to do this again on that device.</p>
-    <p>If you've only got the link and haven't been added yet, the app will say so and offer to ask for you: leave your name and a line about how we know each other, and you'll get an email once I've approved it. That last part is a real person tapping a button, so it won't be instant.</p>
+    <p class="section-lede">Open it from your home screen and it fills the screen, with no
+      browser bar.</p>
 
-    <p><strong>If the email doesn't turn up, look in your spam folder.</strong> Margin's emails come from an ordinary personal Gmail account rather than a company mail server, and that's often enough for Gmail to file the first one as junk. Mark it "Not spam" once and the rest will come through to your inbox normally.</p>
-    <p>Type (or tap the mic and speak) a word you've come across recently, add the title of whatever you were reading in the "Reading" field, and hit Look up — or just pause, since it searches as you type. Some words only have one meaning — that's a single card with a Save to list button. Others have several ("rubric" has ten!) — you'll see them grouped by part of speech, each with its own Save this meaning button, so you can pick whichever one actually matches how you saw it used. That's really it — the more real words you try, the more useful your feedback is.</p>
-    <p>Typing a long word off a page is the tedious part, so there's a third option next to the mic: the <strong>scan</strong> button. Point the camera at the page (or pick a photo you've already taken), drag a box over the paragraph you care about, and it reads the words back to you as a list — tap the one you were after. If it misreads something, there's an "Enter it manually instead" way out.</p>
+    <p><strong>Signing in.</strong> It asks for your email and sends a link. Tap it and you're
+      in, on that device, for good. If you haven't been added yet, it offers to ask for you —
+      that's a real person approving it, so it isn't instant.</p>
 
-    <p>The <strong>Reading</strong> field remembers books you've used before, and the <strong>Library…</strong> dropdown beside it keeps them in one place. You can add a book by typing its title, or by scanning its cover — that fills in the title, author and cover picture for you. Whatever's in "Reading" gets tagged onto each word you save, which is what makes the saved list worth having later.</p>
+    <p><strong>If the email doesn't arrive, check spam.</strong> Margin's mail comes from an
+      ordinary Gmail account, which is often enough to get the first one filed as junk. Mark it
+      "Not spam" once and the rest come through.</p>
 
-    <p>When you save a word there's also an optional <strong>line from your book</strong> field — the actual sentence you found it in. It's the difference between a definition you have to take on faith and one you can see working.</p>
+    <p><strong>Looking a word up.</strong> Type it, or tap the mic and say it — it searches as
+      you type, so you needn't press anything. One meaning gives you one card; several give you
+      one per sense, grouped by part of speech, so you save the one you actually met.</p>
 
-    <p>Next to "Dictionary" on the result card there's an <strong>AI</strong> tab — tap it for an AI-written definition instead, which tries to match the sense of the word to whatever book you typed in "Reading." It takes a few seconds the first time (it's asking an AI model, not just looking a word up), then it's instant if you switch back and forth. Totally optional — the free dictionary is the default and works fine without it.</p>
-    <p>Your saved words live under <strong>Saved words</strong> further down, with a count next to it. It starts closed — tap the heading to open it, then tap any word to see its full entry, the book it came from, and a <strong>Learned it</strong> button for when you've got one down for good. Learned words stay in the list, greyed out, but stop coming up in practice.</p>
+    <p><strong>Scanning instead of typing.</strong> The scan button takes a photo of the page,
+      lets you drag a box round the part you want, and reads the words back as a tappable list.
+      There's a manual fallback if it misreads.</p>
 
-    <p>Speaking of which: <strong>Practice</strong> sits on that same row, to the right. Review as flashcards (tap a card to flip it and reveal the meaning), or as a quick multiple-choice quiz. Quiz mode needs at least 4 saved words to have enough wrong answers to choose from; flashcards work with just one. If you've filtered to one book, you'll practise only that book's words.</p>
-    <p>There's also a small light / dark / system icon in the top corner if the default look isn't to your taste.</p>
+    <p><strong>Reading, and the library.</strong> Whatever's in the "Reading" field gets tagged
+      onto every word you save — that's what makes the list worth having later. The
+      <strong>Library…</strong> dropdown keeps your books in one place; add one by typing the
+      title or by scanning its cover.</p>
+
+    <p><strong>The line from your book.</strong> An optional field on the result card for the
+      sentence you actually found the word in.</p>
+
+    <p><strong>The AI tab.</strong> Next to "Dictionary" on the card. It writes a definition
+      aimed at whatever book you named, which helps with ambiguous words. A few seconds the
+      first time, instant after. Entirely optional.</p>
+
+    <p><strong>Your words, and practice.</strong> <strong>Saved words</strong> further down
+      starts closed — tap it to open, then tap any word for its full entry and a
+      <strong>Learned it</strong> button. <strong>Practice</strong> on the same row gives you
+      flashcards or a quiz; the quiz needs four saved words, flashcards need one.</p>
+
+    <p>There's a light / dark / system toggle in the top corner.</p>
   </section>
 
   <footer>
-    Questions, confusions, or things that broke — just tell whoever sent you this. That's exactly what this round of testing is for.
+    Anything confusing or broken — there's a <strong>Send feedback</strong> button at the bottom of the app, and it comes straight to me.
   </footer>
 </div>
 </body>

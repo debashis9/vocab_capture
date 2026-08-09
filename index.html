@@ -143,16 +143,43 @@
       border-radius: var(--radius);
       padding: 18px 20px 4px;
     }
-    .faq-intro { margin: 0 0 16px; font-size: 13.5px; line-height: 1.55; color: var(--ink-soft); }
-    .faq-intro a { color: var(--oxblood); }
+    /* Shared by the FAQ and the feedback form, so both panels close the same way. */
+    .panel-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 16px; margin: 0 0 18px;
+    }
+    .panel-title {
+      font-family: "Fraunces", serif; font-weight: 600; font-size: 19px; margin: 0;
+    }
+    .panel-close {
+      background: transparent; color: var(--ink-soft); border: 1.5px solid var(--line);
+      border-radius: 999px; padding: 5px 14px; font-size: 12.5px; flex: 0 0 auto;
+    }
+    .panel-close:hover, .panel-close:focus-visible {
+      background: transparent; color: var(--oxblood); border-color: var(--oxblood);
+    }
     .faq-group { margin: 0 0 18px; }
     .faq-group h3 {
       margin: 0 0 10px; font-size: 11px; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
     }
+    /* Numbered continuously across the groups, not restarted per group: the
+       count is there so a question can be pointed at ("see 7"), and a number
+       that repeats three times down the page can't do that. */
+    .faq { counter-reset: faq-q; }
     .faq dl { margin: 0; }
-    .faq dt { font-family: "Fraunces", serif; font-weight: 600; font-size: 15px; margin: 0 0 3px; }
-    .faq dd { margin: 0 0 13px; font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
+    .faq dt {
+      font-family: "Fraunces", serif; font-weight: 600; font-size: 15px;
+      margin: 0 0 3px; padding-left: 26px; position: relative;
+      counter-increment: faq-q;
+    }
+    .faq dt::before {
+      content: counter(faq-q);
+      position: absolute; left: 0; top: 0.1em;
+      font-family: "Inter", system-ui, sans-serif; font-size: 12px; font-weight: 500;
+      color: var(--oxblood); font-variant-numeric: tabular-nums;
+    }
+    .faq dd { margin: 0 0 13px 26px; font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
     .faq dd:last-child { margin-bottom: 0; }
 
     /* ---- Feedback panel, same shape as the FAQ so the footer opens two
@@ -981,6 +1008,27 @@
       text-transform: uppercase; letter-spacing: 0.05em;
     }
     .admin-empty { color: var(--ink-soft); font-size: 14px; padding: 12px 2px 0; }
+
+    /* Spent invite codes, folded away rather than deleted. */
+    .admin-details { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .admin-details summary {
+      cursor: pointer; font-size: 13px; color: var(--ink-soft);
+      list-style: none; padding: 4px 0;
+    }
+    .admin-details summary::-webkit-details-marker { display: none; }
+    .admin-details summary::before { content: "▸ "; color: var(--ink-soft); }
+    .admin-details[open] summary::before { content: "▾ "; }
+    .admin-details summary:hover { color: var(--oxblood); }
+
+    /* Feedback: the message is the content, so it leads and gets room to
+       breathe; who and when are the caption under it. */
+    .feedback-row { display: block; padding: 14px 0; }
+    .feedback-msg {
+      display: block; font-size: 15px; line-height: 1.55; color: var(--ink);
+      white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px;
+    }
+    .feedback-row .admin-email-meta a { color: var(--oxblood); }
+    .feedback-unsent { color: var(--oxblood); }
     .admin-denied { color: var(--oxblood); font-size: 15px; }
 
     /* ---- Narrow screens (phones) ---- */
@@ -1029,8 +1077,13 @@
        unreadable regardless of how much room there is for it. */
     @media (min-width: 1080px) {
       .wrap { max-width: 1020px; }
-      header, #auth-section, #faq-panel, #feedback-panel,
-      #admin-section, .page-foot, .update-banner { max-width: 620px; }
+      /* Prose keeps a reading measure. The masthead and the footer do NOT:
+         they are frames for the whole page, and capping them left their rules
+         stopping halfway across with the saved-words column sitting past the
+         end — which reads as a broken layout, not as a measure. Only things
+         made of sentences are capped. */
+      #auth-section, #faq-panel, #feedback-panel, #admin-section { max-width: 620px; }
+      .update-banner { max-width: 620px; }
 
       /* :not([hidden]) matters. `display: grid` on the bare id would beat the
          UA stylesheet's `[hidden] { display: none }` on specificity, and the
@@ -1221,21 +1274,21 @@
          #app-content so it's readable signed out too -- someone deciding
          whether to ask for access can see what leaves their device first. -->
     <section id="faq-panel" class="faq" hidden>
-      <p class="faq-intro">Short answers on how Margin works, and what it does with your
-        things.</p>
+      <!-- The panel opens above the footer button that opened it, and it is
+           long — so closing it used to mean scrolling the whole way back down.
+           This close sits at the top, where the reader already is. -->
+      <div class="panel-head">
+        <h2 class="panel-title">Common questions</h2>
+        <button type="button" id="faq-close" class="panel-close">Close</button>
+      </div>
 
       <div class="faq-group">
         <h3>What this is</h3>
         <dl>
           <dt>What is Margin?</dt>
-          <dd>A place to put the words you meet while reading. You're on a page, you hit a
-            word you don't know, and by the time you've found a dictionary the sentence has
-            gone cold — Margin is the shortest path from that word to its meaning, and it
-            keeps the word afterwards, filed under the book you found it in. Type it, say
-            it, or photograph the page and tap the word. Later, the words you've kept turn
-            into flashcards and a quiz. It's a small personal project, not a service, which
-            is why it's invite-only and why there are no accounts to manage, no adverts and
-            nothing to pay.</dd>
+          <dd>A place to keep the words you meet while reading. Catch one off the page —
+            type it, say it, or photograph it — and it's filed under the book you found it
+            in. Later they become flashcards and a quiz.</dd>
         </dl>
       </div>
 
@@ -1243,26 +1296,22 @@
         <h3>Looking a word up</h3>
         <dl>
           <dt>Where do the definitions come from?</dt>
-          <dd>A free public dictionary API built on Wiktionary's data. No account or key
-            needed, and it's what every lookup uses by default.</dd>
+          <dd>A free public dictionary built on Wiktionary's data. No key, no account.</dd>
 
           <dt>Why does one word show several meanings?</dt>
-          <dd>Because most words have several. Margin shows every sense, grouped by part of
-            speech, and lets you save the one that matches how you actually saw it used
-            rather than guessing on your behalf.</dd>
+          <dd>Most words have several. Margin shows them all, grouped by part of speech, so
+            you save the one you actually met.</dd>
 
           <dt>What is the AI tab?</dt>
-          <dd>An optional second opinion. It asks an AI model for a definition written for
-            whatever book is in your “Reading” field, so an ambiguous word gets the sense
-            that fits. It only runs when you open the tab, never on every lookup.</dd>
+          <dd>A second opinion, written for whatever book is in your “Reading” field — handy
+            when a word is ambiguous. It only runs when you open the tab.</dd>
 
           <dt>The word wasn't found — is that a dead end?</dt>
-          <dd>No. The card still appears with the AI tab a tap away, which is usually the
-            answer for names, slang and very new words. If you're offline you'll get a
-            “Save for later” button instead.</dd>
+          <dd>No. The card still appears with the AI tab a tap away, which usually handles
+            names, slang and new words. Offline, you get “Save for later” instead.</dd>
 
           <dt>Can I say the word instead of typing it?</dt>
-          <dd>Yes — the mic button uses your device's own speech recognition.</dd>
+          <dd>Yes — the mic uses your device's own speech recognition.</dd>
         </dl>
       </div>
 
@@ -1270,22 +1319,20 @@
         <h3>Reading off the page</h3>
         <dl>
           <dt>What does the scan button do?</dt>
-          <dd>Takes a photo of the page — or uses one you already have — and lets you drag a
-            box around the part you care about. Every word in it becomes tappable, appearing
-            as they're recognised.</dd>
+          <dd>Photograph the page, drag a box around the part you want, and every word in it
+            becomes tappable as it's recognised.</dd>
 
           <dt>What happens to the photo?</dt>
-          <dd>It's sent to Google's Gemini to be read back as text, then discarded. Margin
-            doesn't keep photos.</dd>
+          <dd>Sent to Google's Gemini to be read as text, then discarded. Margin keeps no
+            photos.</dd>
 
           <dt>Can I scan a book instead of typing its title?</dt>
-          <dd>Yes. Scan the cover and it fills in the title, author and ISBN; the cover
-            picture comes from Open Library. There's a manual entry fallback if the cover is
-            damaged or too shiny to read.</dd>
+          <dd>Yes — scan the cover for title, author and ISBN. Cover art comes from Open
+            Library. Manual entry is there if the cover won't read.</dd>
 
           <dt>What is “the line from your book”?</dt>
-          <dd>An optional field for the actual sentence you met the word in — which is a
-            different thing from the dictionary's own example sentence.</dd>
+          <dd>The actual sentence you met the word in, as opposed to the dictionary's own
+            example.</dd>
         </dl>
       </div>
 
@@ -1293,22 +1340,19 @@
         <h3>Your words</h3>
         <dl>
           <dt>Where are my saved words kept?</dt>
-          <dd>In your own account, so they follow you from your phone to any other device
-            you sign in on.</dd>
+          <dd>In your account, so they follow you between devices.</dd>
 
           <dt>Can anyone else see them?</dt>
-          <dd>No. Every saved word is tied to your account, and the database enforces that
-            itself rather than trusting the app to.</dd>
+          <dd>No. The database enforces that, not just the app.</dd>
 
           <dt>What does “Learned it” do?</dt>
-          <dd>Marks a word as one you've got. It stays in your list, greyed out, and stops
-            coming up in practice.</dd>
+          <dd>Marks a word as got. It stays in the list, greyed out, and drops out of
+            practice.</dd>
 
           <dt>How does practice work?</dt>
-          <dd>Flashcards you tap to flip, or a quick multiple-choice quiz. Both are built
-            from your own saved words — no AI, no connection needed. Filter to one book
-            first and you'll practise only that book. The quiz needs at least four saved
-            words to have enough wrong answers to offer.</dd>
+          <dd>Flashcards to flip, or a multiple-choice quiz — both built from your own saved
+            words, no connection needed. Filter to a book first to practise just that one.
+            The quiz needs four saved words.</dd>
         </dl>
       </div>
 
@@ -1316,22 +1360,20 @@
         <h3>Offline, updates and access</h3>
         <dl>
           <dt>Does it work without a connection?</dt>
-          <dd>Your saved words and practice do, from a copy kept on the device. Looking up a
-            new word needs the network — but you can queue one with “Save for later” and it
-            resolves itself once you're back online.</dd>
+          <dd>Saved words and practice do, from a local copy. New lookups need the network,
+            but “Save for later” queues one and resolves it when you're back.</dd>
 
           <dt>Why did a “new version” bar appear?</dt>
-          <dd>The app updated itself in the background. Tapping Refresh loads the new one;
-            nothing is lost either way.</dd>
+          <dd>The app updated in the background. Refresh loads it; nothing is lost either
+            way.</dd>
 
           <dt>Why is signing in invite-only?</dt>
-          <dd>It's a personal project rather than a service. If you have the link but no
-            account yet, the app will offer to ask on your behalf.</dd>
+          <dd>It's a personal project, not a service. With the link but no account, the app
+            offers to ask for you.</dd>
 
           <dt>The sign-in email never arrived.</dt>
-          <dd>Check your spam folder. Margin's mail comes from an ordinary personal Gmail
-            account, which is often enough for it to be filtered the first time. Mark it
-            “Not spam” once and the rest arrive normally.</dd>
+          <dd>Check spam. Margin's mail comes from a personal Gmail account, so it's often
+            filtered the first time. Mark it “Not spam” once and the rest arrive.</dd>
         </dl>
       </div>
     </section>
@@ -2269,6 +2311,10 @@
     // word. Doesn't touch "Reading", since that stays the same across
     // several words from the same book.
     function resetToIdle() {
+      // Retires any lookup still in flight. Without this a slow response for
+      // the word that was just cleared lands afterwards and repopulates the
+      // card the reset had emptied.
+      lookupSeq++;
       currentResult = null;
       aiResult = null;
       aiLoading = false;
@@ -2796,6 +2842,16 @@
 
     $("faq-toggle").addEventListener("click", () => {
       toggleFootPanel("faq-toggle", "faq-panel", "feedback-toggle", "feedback-panel");
+    });
+
+    // Closing from the top of the panel returns you to the footer you came
+    // from, rather than leaving you stranded wherever the collapse happened
+    // to dump the scroll position.
+    $("faq-close").addEventListener("click", () => {
+      $("faq-panel").hidden = true;
+      $("faq-toggle").setAttribute("aria-expanded", "false");
+      $("faq-toggle").scrollIntoView({ behavior: "smooth", block: "center" });
+      $("faq-toggle").focus();
     });
 
     $("feedback-toggle").addEventListener("click", () => {
@@ -4178,12 +4234,11 @@
     $("word").addEventListener("keydown", (e) => {
       if (e.key === "Enter") { clearTimeout(autoSearchTimer); lookup($("word").value); }
     });
-    $("clear-word").addEventListener("click", () => {
-      clearTimeout(autoSearchTimer);
-      $("word").value = "";
-      updateClearButton();
-      $("word").focus();
-    });
+    // Clearing the field clears the result too. It used to empty the input and
+    // leave the card sitting there, so the screen showed a definition of a word
+    // that was no longer written anywhere — resetToIdle is the same thing a
+    // successful save does, and it is what "clear" should always have meant.
+    $("clear-word").addEventListener("click", resetToIdle);
     out.addEventListener("click", (e) => {
       if (e.target.id === "save") saveCurrentResult();
       if (e.target.id === "save-ai") saveAIResult();
@@ -4581,13 +4636,61 @@
       ].join("\n");
     }
 
+    // Feedback, newest first. Read-only: there is nothing to action here, so
+    // there are no buttons — the reply happens in a mail client, and the row
+    // exists so a message is never lost to a failed send.
+    function renderFeedbackCard(rows, loadError) {
+      if (loadError) {
+        return `
+          <div class="admin-card">
+            <h2 class="admin-title">Feedback</h2>
+            <p class="admin-req-status error">Couldn't load it: ${escapeHtml(loadError.message)}
+              ${/relation|does not exist/i.test(loadError.message || "")
+                ? " — supabase/sql/feedback.sql may not have been run yet." : ""}</p>
+          </div>`;
+      }
+      return `
+        <div class="admin-card">
+          <h2 class="admin-title">Feedback${rows.length ? ` · ${rows.length}` : ""}</h2>
+          <p class="admin-lede">Sent from the button at the bottom of the app. Newest first.</p>
+          <ul class="admin-email-list">
+            ${rows.length ? rows.map((row) => `
+              <li class="admin-email-row feedback-row">
+                <span class="admin-email-info">
+                  <span class="feedback-msg">${escapeHtml(row.message)}</span>
+                  <span class="admin-email-meta">
+                    <a href="mailto:${escapeHtml(row.email)}?subject=${
+                      encodeURIComponent("Re: your Margin feedback")
+                    }">${escapeHtml(row.email)}</a>
+                    · ${formatRelative(row.created_at)}${
+                      row.app_version ? ` · ${escapeHtml(row.app_version)}` : ""
+                    }${
+                      // Only ever surfaced when the mail half failed. A silent
+                      // failure is the thing the row exists to make visible.
+                      row.emailed_at ? "" : ` · <span class="feedback-unsent">not emailed${
+                        row.email_error ? `: ${escapeHtml(row.email_error)}` : ""
+                      }</span>`
+                    }
+                  </span>
+                </span>
+              </li>`).join("") : `<li class="admin-empty">Nothing yet.</li>`}
+          </ul>
+        </div>`;
+    }
+
     function renderCodesCard(codes) {
+      // Only live codes in the list. A spent code is history, not a thing to
+      // act on, and a column of struck-through rows is the fastest way to make
+      // the one link you actually want hard to find. Folded away rather than
+      // dropped, matching how ignored access requests are already handled --
+      // nothing is deleted, and the count stays visible on the summary.
+      const live = codes.filter((row) => !codeStatus(row).spent);
+      const spent = codes.filter((row) => codeStatus(row).spent);
       return `
         <div class="admin-card">
           <h2 class="admin-title">Invite links</h2>
-          <p class="admin-lede">A link that lets someone in without waiting for you. “Copy invite”
-            puts the link on your clipboard inside a short message you can paste straight into
-            WhatsApp — what Margin is, and where the sign-in email will probably hide.</p>
+          <p class="admin-lede">Lets someone in without waiting for you. “Copy invite” copies a
+            whole message, not just the URL — paste it into WhatsApp as it stands.</p>
           <form id="code-add-form" class="code-add-form">
             <input id="code-value" type="text" placeholder="code" maxlength="40" required value="${escapeHtml(suggestCode())}" />
             <input id="code-label" type="text" placeholder="Who's it for? (optional)" maxlength="60" />
@@ -4610,7 +4713,18 @@
           </form>
           <p id="code-status" class="admin-req-status" hidden></p>
           <ul class="admin-email-list">
-            ${codes.length ? codes.map((row) => {
+            ${live.length ? live.map(codeRow).join("") : `<li class="admin-empty">No live invite links.</li>`}
+          </ul>
+          ${spent.length ? `
+            <details class="admin-details">
+              <summary>${spent.length} spent · expired, turned off or used up</summary>
+              <ul class="admin-email-list">${spent.map(codeRow).join("")}</ul>
+            </details>` : ""}
+        </div>`;
+    }
+
+    // One row, used by both lists above.
+    function codeRow(row) {
               const st = codeStatus(row);
               return `
               <li class="admin-email-row admin-req-row${st.spent ? " deleted" : ""}">
@@ -4630,9 +4744,6 @@
                   ${st.spent ? "" : `<button type="button" class="saved-delete code-disable" data-code="${escapeHtml(row.code)}">Turn off</button>`}
                 </span>
               </li>`;
-            }).join("") : `<li class="admin-empty">No invite links yet.</li>`}
-          </ul>
-        </div>`;
     }
 
     function renderInviteCard(rows, adminEmail) {
@@ -4679,7 +4790,7 @@
       // Invite list ordering unchanged: active rows (deleted_at is null) first,
       // deleted ones after, oldest addition first within each group so the
       // serial numbers read as a stable running log.
-      const [allowed, requests, codes] = await Promise.all([
+      const [allowed, requests, codes, feedback] = await Promise.all([
         sb.from("allowed_emails")
           .select("email, added_at, deleted_at")
           .order("deleted_at", { ascending: true, nullsFirst: true })
@@ -4690,6 +4801,13 @@
         sb.from("invite_codes")
           .select("code, label, max_uses, uses, expires_at, disabled_at, created_at")
           .order("created_at", { ascending: false }),
+        // Independent of the other three for the same reason they're
+        // independent of each other: if feedback.sql hasn't been run against
+        // this project, that must not take the invite list down with it.
+        sb.from("feedback")
+          .select("id, email, message, app_version, created_at, emailed_at, email_error")
+          .order("created_at", { ascending: false })
+          .limit(50),
       ]);
 
       if (allowed.error) {
@@ -4706,6 +4824,7 @@
           <button type="button" class="btn-signout admin-back">Back to Margin</button>
         </div>
         ${renderPendingCard(pending, ignored, requests.error)}
+        ${renderFeedbackCard(feedback.error ? [] : (feedback.data || []), feedback.error)}
         ${renderCodesCard(codes.error ? [] : (codes.data || []))}
         ${renderInviteCard(allowed.data, adminEmail)}
         ${renderAdminNotes()}`;
