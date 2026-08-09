@@ -132,6 +132,7 @@
     .foot-link:hover, .foot-link:focus-visible,
     .foot-link[aria-expanded="true"] { background: transparent; color: var(--oxblood); }
     .foot-sep { color: var(--line); }
+    .foot-sep[hidden] { display: none; }
     .foot-link[hidden] { display: none; }
 
     /* ---- FAQ panel, opened from the footer ---- */
@@ -243,6 +244,21 @@
 
     /* ---- Lookup bar ---- */
     .lookup { display: flex; gap: 10px; margin-top: 24px; }
+    /* "Look up" is outlined, not filled. Lookup already fires on its own about
+       half a second after you stop typing, so by the time a thumb reaches this
+       button the answer is usually on screen -- it was the loudest thing on the
+       page for an action that had already happened. It stays for the deliberate
+       press and for the keyboard; it just doesn't shout. That also keeps the
+       screen to one filled accent (the active Dictionary/AI tab), which is the
+       rule the declutter round set. */
+    #go {
+      background: transparent; color: var(--oxblood);
+      border: 1.5px solid var(--oxblood);
+    }
+    #go:hover { background: var(--oxblood); color: var(--on-oxblood); }
+    /* Part-of-speech-level synonyms, shown once under the heading rather than
+       repeated inside each sense. Tucked up under the heading it belongs to. */
+    .chips-pos { margin-top: 8px; }
     .lookup[hidden] { display: none; }
     .word-field { position: relative; flex: 1; min-width: 0; }
     .word-field input {
@@ -310,17 +326,24 @@
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: var(--radius);
-      padding: 24px 24px 26px;
+      padding: 24px 24px 26px 28px; /* extra on the left to clear the margin rule */
       position: relative;
       animation: rise .28s ease both;
     }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
 
+    /* The margin rule, third and last place it appears: the icon, the wordmark,
+       and here down the left edge of the looked-up word. This used to be a
+       44x3px oxblood stub sitting on the top border, which read as a torn
+       corner rather than a mark and said nothing a reader could decode. Run
+       vertically it means something -- the word is written in the margin --
+       and it ties the card to the app's own icon. The radius matches the
+       card's so it reads as part of the edge, not as a sticker on top of it. */
     .card::before {
-      content: ""; position: absolute; left: 24px; top: 0;
-      width: 44px; height: 3px; background: var(--oxblood);
-      border-radius: 0 0 3px 3px;
+      content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 5px; background: var(--oxblood);
+      border-radius: var(--radius) 0 0 var(--radius);
     }
     .headword {
       font-family: "Fraunces", serif; font-weight: 600;
@@ -334,7 +357,13 @@
       display: inline-flex; border-radius: 6px;
     }
     .btn-audio:hover { color: var(--oxblood); background: var(--oxblood-soft); }
-    .def { font-size: 17px; line-height: 1.55; margin: 16px 0 0; }
+    /* The definition is the content, not the chrome, so it's set in the book
+       face rather than the interface one. Fraunces runs slightly larger on the
+       body than Inter at the same size, hence 18/1.5 against the old 17/1.55. */
+    .def {
+      font-family: "Fraunces", serif;
+      font-size: 18px; line-height: 1.5; margin: 16px 0 0;
+    }
     .example {
       margin: 14px 0 0; padding-left: 14px;
       border-left: 2px solid var(--oxblood-soft);
@@ -434,6 +463,10 @@
        line while the book is still open in front of you, then pick the
        meaning that fits it. */
     .sentence-field { margin-top: 12px; }
+    /* Clear air under the "add the line" link. Without it the part of speech
+       that opens the dictionary body sits directly against that link, and the
+       two read as one run-on line. */
+    #tab-body { margin-top: 14px; }
     .btn-sentence {
       background: transparent; color: var(--ink-soft); font-weight: 500;
       border: none; padding: 0; font-size: 13.5px;
@@ -770,12 +803,23 @@
     }
     .auth-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 22px; margin: 0 0 6px; }
     .auth-lede { color: var(--ink-soft); font-size: 14px; margin: 0 0 20px; }
-    .auth-form { display: flex; gap: 10px; }
+    /* Wraps rather than squeezing. Held on one line, the button pushed the
+       field down to about five characters on a 390px screen and clipped the
+       placeholder to "you@example." -- on the one screen a new tester sees
+       before anything else. */
+    .auth-form { display: flex; gap: 10px; flex-wrap: wrap; }
+    /* Sits beside the field where there's room; takes the whole of the second
+       line once the row wraps, rather than being a small pill adrift on it. */
+    .auth-form button { flex: 1 1 auto; }
     .auth-form[hidden] { display: none; }
     .auth-form input {
-      flex: 1; min-width: 0;
+      /* Not flex:1 -- a basis wide enough for a real address, so the row wraps
+         instead of crushing it. --surface, not --paper-2, so it reads as a
+         field you can type in rather than as a disabled one; every other input
+         in the app is on --surface too. */
+      flex: 1 1 15rem; min-width: 0;
       font: inherit; font-size: 16px;
-      background: var(--paper-2);
+      background: var(--surface);
       border: 1px solid var(--line); border-radius: var(--radius);
       padding: 12px 14px; color: var(--ink);
     }
@@ -972,6 +1016,40 @@
       .crop-viewport img { max-height: 50vh; }
       .camera-section, .library-section, .practice-section { margin-top: 30px; padding-top: 20px; }
     }
+
+    /* ---- Wide screens ----
+       Below this the app is one phone-shaped column centred in whatever space
+       there is, which on a laptop leaves the saved list a long scroll away from
+       the word you just looked up. Above it, the saved list becomes a sidebar
+       and the two are visible together.
+
+       Only the app grid takes the extra width. Everything that's prose -- the
+       masthead, the sign-in card, the FAQ, the feedback form, the admin screen
+       -- keeps a reading measure, because a 1000px line of body text is
+       unreadable regardless of how much room there is for it. */
+    @media (min-width: 1080px) {
+      .wrap { max-width: 1020px; }
+      header, #auth-section, #faq-panel, #feedback-panel,
+      #admin-section, .page-foot, .update-banner { max-width: 620px; }
+
+      /* :not([hidden]) matters. `display: grid` on the bare id would beat the
+         UA stylesheet's `[hidden] { display: none }` on specificity, and the
+         whole app would render behind the sign-in card. */
+      #app-content:not([hidden]) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 330px;
+        column-gap: 44px;
+        align-items: start;
+      }
+      .book-row-reading, .lookup, #out { grid-column: 1; }
+      .saved-section {
+        grid-column: 2; grid-row: 1 / span 3;
+        margin-top: 0; padding-top: 0; border-top: none;
+      }
+      /* The three full-screen takeovers ignore the columns -- a photo to crop
+         or a flashcard to flip wants the whole width. */
+      #practice-section, #camera-section, #library-section { grid-column: 1 / -1; }
+    }
   </style>
 </head>
 
@@ -1038,11 +1116,33 @@
     </section>
 
     <div id="app-content" hidden>
-      <!-- The lookup bar. First thing on the page now: everything else here
-           is context for a word you haven't caught yet. -->
+      <!-- Book this word came from — the first line on the page, like the
+           bookplate inside a cover: you set it once when you sit down and it
+           holds for every word after.
+           Value is remembered between sessions. book-select is a quick-pick
+           from the library (added order) -- choosing one just fills the text
+           input, so typing a book that isn't in the library still works
+           exactly as before, and its "Add a book…" option is now the only
+           way into the Library screen (the old button beside "Saved words"
+           is gone). -->
+      <div class="book-row book-row-reading">
+        <label for="book">Reading</label>
+        <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+        <select id="book-select" class="book-filter" aria-label="Pick from your library">
+          <option value="">Library…</option>
+          <option value="__add__">Add a book…</option>
+        </select>
+      </div>
+
+      <!-- The lookup bar. It sat first on the page for one round (everything
+           else being context for a word you haven't caught yet); it now sits
+           under Reading, because Reading is set once when you open the book
+           and then stays put, so it reads as the header for the session rather
+           than as another thing to fill in. Don't swap them back without a
+           reason -- this order was chosen, not inherited. -->
       <div class="lookup">
         <div class="word-field">
-          <input id="word" type="text" placeholder="a word…" autocomplete="off"
+          <input id="word" type="text" placeholder="Type, speak, or scan…" autocomplete="off"
                  autocapitalize="none" spellcheck="false" enterkeyhint="search" />
           <button id="clear-word" type="button" class="btn-clear" aria-label="Clear" hidden>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1070,26 +1170,11 @@
         <button id="go">Look up</button>
       </div>
 
-      <!-- Book this word came from — sits under the lookup bar, since it's
-           context for the word rather than the thing you came here to do.
-           Value is remembered between sessions. book-select is a quick-pick
-           from the library (added order) -- choosing one just fills the text
-           input, so typing a book that isn't in the library still works
-           exactly as before, and its "Add a book…" option is now the only
-           way into the Library screen (the old button beside "Saved words"
-           is gone). -->
-      <div class="book-row book-row-reading">
-        <label for="book">Reading</label>
-        <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
-        <select id="book-select" class="book-filter" aria-label="Pick from your library">
-          <option value="">Library…</option>
-          <option value="__add__">Add a book…</option>
-        </select>
-      </div>
-
       <!-- One of: idle hint / loading / error / the card -->
       <div id="out">
-        <p class="status">Type, speak, or scan a word above.</p>
+        <!-- Empty on purpose. The placeholder in the field above carries the
+             instruction now, and it used to be said twice. #out still fills
+             with loading, error and result states. -->
       </div>
 
       <!-- Saved list: collapsed by default so the page ends at the capture
@@ -1286,7 +1371,7 @@
     <footer class="page-foot">
       <button id="faq-toggle" type="button" class="foot-link"
         aria-expanded="false" aria-controls="faq-panel">FAQ</button>
-      <span class="foot-sep" aria-hidden="true">·</span>
+      <span id="foot-sep" class="foot-sep" aria-hidden="true">·</span>
       <button id="feedback-toggle" type="button" class="foot-link" hidden
         aria-expanded="false" aria-controls="feedback-panel">Send feedback</button>
     </footer>
@@ -1333,6 +1418,9 @@
       // The FAQ beside it stays: someone deciding whether to ask for access
       // should be able to read what the app does with their things first.
       $("feedback-toggle").hidden = true;
+      // The separator goes with it, or the footer reads "FAQ ·" with nothing
+      // after the dot.
+      $("foot-sep").hidden = true;
       $("feedback-panel").hidden = true;
       $("feedback-toggle").setAttribute("aria-expanded", "false");
     }
@@ -1345,6 +1433,7 @@
       // to be shown/hidden explicitly with the signed-in state.
       $("sign-out").hidden = false;
       $("feedback-toggle").hidden = false;
+      $("foot-sep").hidden = false;
       // The way into the admin route, for the one account that has one. Anyone
       // else signed in never sees it (and gets nothing from the hash anyway --
       // the RLS policies on allowed_emails/access_requests are the boundary).
@@ -2059,6 +2148,13 @@
     // sense "an incandescent lamp" instead of the everyday adjective meaning sitting
     // right next to it). render() shows all of them when there's more than one, and the
     // person looking the word up picks the one that fits.
+    // A sense's full synonym list: its own, plus the ones its part of speech
+    // carries. Kept in one place because three callers need the merged view
+    // (the single-sense card, saving a sense, and the top-level mirror) while
+    // only the multi-sense card wants them apart.
+    const senseSynonyms = (s) => dedupe([...(s.posSynonyms || []), ...(s.synonyms || [])]).slice(0, 6);
+    const senseAntonyms = (s) => dedupe([...(s.posAntonyms || []), ...(s.antonyms || [])]).slice(0, 6);
+
     function pickBest(word, data) {
       const entry = Array.isArray(data) ? data[0] : data;
       // Wiktionary sometimes gives a shortened shared-prefix phonetic ending in "-/"
@@ -2078,14 +2174,25 @@
             pos,
             definition: def.definition || "No definition text was provided.",
             example: def.example || "",
-            // Gather synonyms/antonyms from both the meaning level and the definition level.
-            synonyms: dedupe([...(meaning.synonyms||[]), ...(def.synonyms||[])]).slice(0,6),
-            antonyms: dedupe([...(meaning.antonyms||[]), ...(def.antonyms||[])]).slice(0,6),
+            // Sense-level only. These two used to merge in the meaning level's
+            // lists as well, and dictionaryapi.dev almost always puts synonyms
+            // at the meaning (part-of-speech) level rather than on individual
+            // definitions -- so every sense sharing a part of speech rendered
+            // the identical row of chips. That reads as a bug, and it's wrong
+            // besides: "radiant, glowing, luminous" belongs to incandescent's
+            // heat sense, not to its passionate one. The shared list is kept
+            // separately below and shown once, under the part of speech it
+            // actually describes.
+            synonyms: dedupe(def.synonyms || []).slice(0,6),
+            antonyms: dedupe(def.antonyms || []).slice(0,6),
+            posSynonyms: dedupe(meaning.synonyms || []).slice(0,6),
+            posAntonyms: dedupe(meaning.antonyms || []).slice(0,6),
           });
         }
       }
       if (!senses.length) {
-        senses.push({ pos: "", definition: "No definition text was provided.", example: "", synonyms: [], antonyms: [] });
+        senses.push({ pos: "", definition: "No definition text was provided.", example: "",
+          synonyms: [], antonyms: [], posSynonyms: [], posAntonyms: [] });
       }
 
       // Top-level pos/definition/etc mirror the first sense, so the single-sense
@@ -2100,8 +2207,12 @@
         pos: first.pos,
         definition: first.definition,
         example: first.example,
-        synonyms: first.synonyms,
-        antonyms: first.antonyms,
+        // The single-sense card and every save path DO want both lists merged:
+        // there's only one sense on show, so the part of speech's synonyms are
+        // unambiguously its synonyms. Only the multi-sense view needs them
+        // kept apart, and it reads the two fields directly.
+        synonyms: senseSynonyms(first),
+        antonyms: senseAntonyms(first),
         source: "typed",
       };
     }
@@ -2164,7 +2275,7 @@
       aiError = null;
       activeTab = "dictionary";
       clearTimeout(autoSearchTimer);
-      out.innerHTML = `<p class="status">Type, speak, or scan a word above.</p>`;
+      out.innerHTML = "";
       $("word").value = "";
       updateClearButton();
       $("word").focus();
@@ -2203,8 +2314,19 @@
         </article>`;
     }
 
-    // The reader's own line from the book, per word. Deliberately outside
-    // #tab-body so switching Dictionary/AI doesn't wipe what's been typed;
+    // The reader's own line from the book, per word.
+    //
+    // It sits above the definition, and it has to. Moving it below was tried
+    // and reverted: the line is read at save time, saving clears the card, and
+    // a multi-sense word has a Save button inside every sense -- so the only
+    // position that comes before every save button in both layouts is this one.
+    // Below the definition it read as an afterthought you'd notice just after
+    // losing the chance to use it. What was actually wrong when this was above
+    // is that it collided with whatever #tab-body started with; that's fixed
+    // with spacing on #tab-body rather than by reordering.
+    //
+    // Deliberately outside #tab-body so switching Dictionary/AI doesn't
+    // wipe what's been typed;
     // it only resets when a new card is built, which is exactly right --
     // a new word means a new sentence. Collapsed to a link until used.
     // sentenceDraft mirrors the input's value so it survives those rebuilds.
@@ -2279,9 +2401,16 @@
           <p class="senses-hint">${senses.length} meanings found${
             order.length > 1 ? ` across ${order.length} parts of speech` : ""
           } — save the one that fits.</p>
-          ${order.map(pos => `
+          ${order.map(pos => {
+            // Synonyms carried by the part of speech rather than by one sense.
+            // Shown once here, under the heading they belong to, instead of
+            // repeated identically inside every sense below.
+            const group = senses[byPos.get(pos)[0]];
+            const groupSyn = group.posSynonyms || [];
+            return `
             <div class="pos-group">
               ${ pos ? `<span class="pos">${escapeHtml(pos)}</span>` : "" }
+              ${ groupSyn.length ? `<div class="chips chips-pos">${groupSyn.map(x=>chip(x)).join("")}</div>` : "" }
               <ol class="sense-list">
                 ${byPos.get(pos).map((i, n) => {
                   const s = senses[i];
@@ -2296,7 +2425,8 @@
                   </li>`;
                 }).join("")}
               </ol>
-            </div>`).join("")}
+            </div>`;
+          }).join("")}
         `;
       }
 
@@ -2450,8 +2580,11 @@
           word: currentResult.word,
           meaning: sense.definition,
           partOfSpeech: sense.pos,
-          synonyms: sense.synonyms,
-          antonyms: sense.antonyms,
+          // Merged, not the sense-only lists the card shows -- a saved word is
+          // shown on its own later, where the part of speech's synonyms read
+          // as simply its synonyms.
+          synonyms: senseSynonyms(sense),
+          antonyms: senseAntonyms(sense),
           example: sense.example,
           contextSentence: contextSentenceValue(),
           book: $("book").value.trim(),

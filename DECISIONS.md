@@ -371,6 +371,35 @@ centre rather than a second hand-tuned layout — which is exactly how the two d
 before. The one thing that does not scale is written into the file: the band's inner edge scales,
 its outer edge stays welded to x=0.
 
+### The margin rule belongs in the content, not only on the badge
+
+For a while the app's own motif lived in exactly two places, both of them chrome: the icon and
+the wordmark. The result card — the thing you actually came to read — was marked with a 44×3px
+oxblood stub sitting on its top border, which read as a torn corner rather than as a mark and
+encoded nothing a reader could decode.
+
+That stub is now a vertical rule down the card's left edge. It costs nothing, it matches the
+icon, and unlike the stub it means something: the word is written in the margin.
+
+The general rule this came from: a structural device should say something true about the
+content. If it can't be explained, it's decoration, and decoration is the first thing to cut.
+
+### The definition is set in the book face
+
+Fraunces was doing the brand, the headword, the part of speech, the saved-word titles and the
+headings; Inter was doing the definition. That is backwards. The definition is the content and
+the interface is the frame, so the definition now takes the serif and the card reads as a page
+rather than as a form.
+
+### The primary button is outlined, because the action is automatic
+
+Lookup fires by itself about half a second after typing stops. "Look up" was nevertheless a
+full-width filled block — the loudest element on the screen, for something that had usually
+already happened by the time a thumb reached it.
+
+It stays, because a deliberate press and a keyboard both want it, but outlined. One filled
+accent per screen is the rule; this screen had two.
+
 ---
 
 ## The quiet parts of the interface
