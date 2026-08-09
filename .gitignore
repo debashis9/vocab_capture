@@ -54,3 +54,9 @@ build/
 *.log
 tmp/
 temp/
+
+# --- Local Claude Code tooling ---
+# Skill files dropped here by `/plugin install`. Third-party code with its own
+# licensing, and local tooling rather than part of the app — same reasoning as
+# CLAUDE.md above, and this repo is public.
+.claude/
