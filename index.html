@@ -2117,6 +2117,77 @@
       });
     }
 
+    // ---------- pronunciation ----------
+    const CAN_SYNTHESISE_SPEECH =
+      typeof window.speechSynthesis !== "undefined" &&
+      typeof window.SpeechSynthesisUtterance !== "undefined";
+
+    // The API existing is NOT the same as a voice existing. Desktop Linux
+    // (including WSL) commonly has speechSynthesis with zero voices because
+    // no speech engine is installed — speak() there is silently ignored,
+    // which would put a dead button on screen. Android, iOS, Windows and
+    // macOS all ship voices, so this only bites on desktop Linux.
+    //
+    // Voices also load asynchronously: getVoices() often returns [] on the
+    // first call and fills in later, announced by "voiceschanged". So the
+    // count is tracked live, and a card already on screen is redrawn if the
+    // answer changes — otherwise the first word looked up after a cold start
+    // would be judged on an empty list and lose its button for no reason.
+    let speechVoiceCount = CAN_SYNTHESISE_SPEECH ? window.speechSynthesis.getVoices().length : 0;
+    const canSpeakNow = () => CAN_SYNTHESISE_SPEECH && speechVoiceCount > 0;
+
+    if (CAN_SYNTHESISE_SPEECH) {
+      window.speechSynthesis.addEventListener("voiceschanged", () => {
+        const couldBefore = canSpeakNow();
+        speechVoiceCount = window.speechSynthesis.getVoices().length;
+        if (couldBefore !== canSpeakNow() && currentResult) renderCard();
+      });
+    }
+
+    // The browser's built-in voice. No network, no key, no CDN — the same
+    // Web Speech API family the mic button already uses, just the output
+    // half. Returns false if the platform has no voice available so the
+    // caller can stay quiet rather than pretend something happened.
+    function speakWord(word) {
+      if (!canSpeakNow() || !word) return false;
+      try {
+        window.speechSynthesis.cancel(); // drop anything still queued
+        const utterance = new SpeechSynthesisUtterance(word);
+        utterance.lang = "en-GB";
+        utterance.rate = 0.9; // a shade under normal: this is a word being taught
+        window.speechSynthesis.speak(utterance);
+        return true;
+      } catch (err) {
+        return false;
+      }
+    }
+
+    // Play the API's recording if it actually plays, otherwise speak the
+    // word. Both failure routes are covered because they differ by browser:
+    // some reject play(), some resolve it and then fire "error" once the
+    // response turns out not to be audio (a 502 body is text/plain). The
+    // fellBack latch stops a word being said twice when both fire.
+    //
+    // play() is called synchronously inside the click handler on purpose —
+    // going through an await first would lose the user gesture that mobile
+    // autoplay rules require.
+    function playPronunciation(btn) {
+      const word = btn.dataset.word || "";
+      const url = btn.dataset.audio;
+      if (!url) { speakWord(word); return; }
+
+      let fellBack = false;
+      const fallback = () => {
+        if (fellBack) return;
+        fellBack = true;
+        speakWord(word);
+      };
+
+      const audio = new Audio(url);
+      audio.addEventListener("error", fallback, { once: true });
+      audio.play().catch(fallback);
+    }
+
     // ---------- lookup ----------
     // Bumped on every call and captured as `seq` so that, now lookups can
     // fire automatically while typing (see the auto-search debounce below),
@@ -2130,17 +2201,82 @@
     // would. Returns {found:true, result} on a hit, {found:false} on a
     // genuine 404 (dictionary reachable, word just isn't in it), or throws
     // on any other failure (network unreachable, etc).
-    async function fetchDictionaryEntry(word) {
-      const res = await fetch(
-        "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)
-      );
-      if (res.status === 404) return { found: false };
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
-      return { found: true, result: pickBest(word, data) };
+    // A 5xx from dictionaryapi.dev is NOT the same thing as an unreachable
+    // network, and telling them apart matters because the remedies differ
+    // (retry vs. queue for later) and because blaming the user's connection
+    // for someone else's outage sends them off checking their wifi.
+    // Failures carry err.kind: "server" (they answered, badly) or "network"
+    // (we never got an answer at all).
+    //
+    // Measured 2026-08-11: their CDN serves cached entries fine while
+    // anything that has to reach their origin comes back 502/500 about 40%
+    // of the time — a not-found lookup, or a pronunciation file. Hence the
+    // retry: the endpoint answers in ~250ms, so a second round trip is
+    // cheap, and one retry takes a ~40% failure rate down to ~16%.
+    const DICTIONARY_RETRY_DELAY = 400;
+
+    function dictionaryError(kind, message) {
+      const err = new Error(message);
+      err.kind = kind;
+      return err;
     }
 
-    async function lookup(word) {
+    async function fetchDictionaryEntry(word, { retries = 1 } = {}) {
+      let res;
+      try {
+        res = await fetch(
+          "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)
+        );
+      } catch (err) {
+        // fetch() only rejects when the request never completed — DNS,
+        // TLS, offline, connection reset. A real HTTP status, however bad,
+        // resolves and is handled below.
+        throw dictionaryError("network", err.message || "network request failed");
+      }
+
+      if (res.status === 404) return { found: false };
+
+      if (!res.ok) {
+        if (res.status >= 500 && retries > 0) {
+          await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
+          return fetchDictionaryEntry(word, { retries: retries - 1 });
+        }
+        throw dictionaryError("server", "HTTP " + res.status);
+      }
+
+      try {
+        const data = await res.json();
+        return { found: true, result: pickBest(word, data) };
+      } catch (err) {
+        // A 200 whose body isn't the JSON we expect is their problem, not
+        // the connection's — same class as a 5xx.
+        throw dictionaryError("server", "unreadable response");
+      }
+    }
+
+    // How long an auto-search failure waits before it's allowed to put an
+    // error on screen. See shouldShowFailure below.
+    const AUTO_FAILURE_GRACE = 1200;
+
+    // Auto-search fires on any 500ms pause, which lands mid-word all the
+    // time — "sere" on the way to "serene". That used to paint a failure
+    // card instantly for a word nobody had finished typing yet. Now an
+    // auto-triggered failure waits a moment and only surfaces if the field
+    // still holds the same word: if they typed on, the text has moved and
+    // this result is stale, so it's dropped silently and the newer lookup
+    // (or the "Looking up…" line) owns the screen. An explicit lookup —
+    // Enter, the button, a tapped OCR word — reports immediately, because
+    // there the user has definitively finished.
+    async function shouldShowFailure(seq, word, auto) {
+      if (!auto) return seq === lookupSeq;
+      // Let go of the button first — the grace wait shouldn't block it.
+      $("go").disabled = false;
+      await new Promise((r) => setTimeout(r, AUTO_FAILURE_GRACE));
+      if (seq !== lookupSeq) return false;
+      return $("word").value.trim().toLowerCase() === word;
+    }
+
+    async function lookup(word, { auto = false } = {}) {
       word = word.trim().toLowerCase();
       if (!word) return;
       const seq = ++lookupSeq;
@@ -2153,6 +2289,7 @@
         if (seq !== lookupSeq) return; // superseded by a newer lookup
 
         if (!outcome.found) {
+          if (!(await shouldShowFailure(seq, word, auto))) return;
           renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Check the spelling, or try the base form of the word.`
             + (AI_ENABLED ? " You can also try the AI tab above." : ""));
           return;
@@ -2160,13 +2297,25 @@
         render(outcome.result);
       } catch (err) {
         if (seq !== lookupSeq) return; // superseded by a newer lookup
-        const message = navigator.onLine
-          ? "Couldn't reach the dictionary. Check your connection and try again."
-            + (AI_ENABLED ? " You can also try the AI tab above." : "")
-          : "You're offline — lookups need an internet connection. Try again once you're back online.";
-        // Unlike the confirmed-404 branch above, we genuinely don't know
-        // whether this word exists -- offer to queue it for later instead.
-        renderNotFound(word, message, { queueable: true });
+        if (!(await shouldShowFailure(seq, word, auto))) return;
+
+        // Three different failures that used to share one message. The
+        // queue only exists for "you're offline" — it's drained by the
+        // "online" event, so queueing a word while already online would
+        // strand it until the next disconnect. Hence queueable only in the
+        // genuinely-offline case.
+        const aiHint = AI_ENABLED ? " You can also try the AI tab above." : "";
+        let message, queueable = false;
+        if (!navigator.onLine) {
+          message = "You're offline — lookups need an internet connection. Try again once you're back online.";
+          queueable = true;
+        } else if (err.kind === "server") {
+          message = "The dictionary service is having trouble right now — this is on their end, not yours. Try again in a moment." + aiHint;
+        } else {
+          message = "Couldn't reach the dictionary. Check your connection and try again." + aiHint;
+          queueable = true;
+        }
+        renderNotFound(word, message, { queueable });
       } finally {
         if (seq === lookupSeq) $("go").disabled = false;
       }
@@ -2333,10 +2482,17 @@
     // which would wrongly reset the AI cache.
     function renderCard() {
       const w = currentResult;
+      // The speak button no longer depends on the API having an audio file.
+      // It usually doesn't: as of 2026-08-11 most of dictionaryapi.dev's
+      // pronunciation MP3s return a persistent 502, and plenty of words
+      // (e.g. "lucid") never had one. The browser's own speech synthesis
+      // can say any word, offline and for free, so it backs up a failed
+      // file and stands in when there was never a file to begin with.
+      const canSpeak = w.word && !w.notFound && (w.audio || canSpeakNow());
       const pronunciation = `${
         w.phonetic ? `<span class="phon">${escapeHtml(w.phonetic)}</span>` : ""
       }${
-        w.audio ? `<button type="button" class="btn-audio" data-audio="${escapeHtml(w.audio)}" aria-label="Play pronunciation">
+        canSpeak ? `<button type="button" class="btn-audio" data-audio="${escapeHtml(w.audio || "")}" data-word="${escapeHtml(w.word)}" aria-label="Play pronunciation" title="Play pronunciation">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
             <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
@@ -4229,7 +4385,9 @@
       updateClearButton();
       clearTimeout(autoSearchTimer);
       if (!$("word").value.trim()) return;
-      autoSearchTimer = setTimeout(() => lookup($("word").value), 500);
+      // {auto: true}: a failure here may just be a mid-word pause, so it
+      // isn't allowed to paint an error straight away — see shouldShowFailure.
+      autoSearchTimer = setTimeout(() => lookup($("word").value, { auto: true }), 500);
     });
     $("word").addEventListener("keydown", (e) => {
       if (e.key === "Enter") { clearTimeout(autoSearchTimer); lookup($("word").value); }
@@ -4244,7 +4402,7 @@
       if (e.target.id === "save-ai") saveAIResult();
       if (e.target.id === "save-queue") saveQueuedCapture();
       const audioBtn = e.target.closest(".btn-audio");
-      if (audioBtn) new Audio(audioBtn.dataset.audio).play();
+      if (audioBtn) playPronunciation(audioBtn);
       const saveSenseBtn = e.target.closest(".btn-save-sense");
       if (saveSenseBtn) saveSense(Number(saveSenseBtn.dataset.senseIndex));
       const tabBtn = e.target.closest("[data-tab]");
