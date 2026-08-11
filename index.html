@@ -1009,6 +1009,26 @@
     }
     .admin-empty { color: var(--ink-soft); font-size: 14px; padding: 12px 2px 0; }
 
+    /* Lookup health. The verdict line carries the answer; the table is there
+       to check it against, so the table is deliberately the quieter of the
+       two. Wide content scrolls in its own box rather than the page. */
+    .stats-verdict {
+      font-family: "Fraunces", serif; font-size: 17px; line-height: 1.5;
+      margin: 0 0 4px;
+    }
+    .stats-sub { color: var(--ink-soft); font-size: 14px; margin: 0 0 16px; line-height: 1.5; }
+    .stats-flag { color: var(--oxblood); font-weight: 600; }
+    .stats-scroll { overflow-x: auto; }
+    .stats-table { border-collapse: collapse; font-size: 13px; width: 100%; min-width: 460px; }
+    .stats-table th, .stats-table td {
+      text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line);
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .stats-table th { color: var(--ink-soft); font-weight: 600; font-size: 12px; }
+    .stats-table th:first-child, .stats-table td:first-child { text-align: left; }
+    .stats-table td.stats-zero { color: var(--ink-soft); opacity: 0.45; }
+    .stats-table td.stats-bad { color: var(--oxblood); font-weight: 600; }
+
     /* Spent invite codes, folded away rather than deleted. */
     .admin-details { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
     .admin-details summary {
@@ -2117,6 +2137,52 @@
       });
     }
 
+    // ---------- lookup health counters ----------
+    // Counts outcomes of the outbound calls, so "is the dictionary flaky
+    // today?" has an answer that isn't someone curling it by hand. See
+    // supabase/sql/lookup-stats.sql for the reasoning and the schema.
+    //
+    // COUNTS ONLY, NEVER THE WORD. Deliberate: this must not become a log of
+    // everything typed into the box. It's why guide.html's privacy list needs
+    // no new line.
+    //
+    // Buffered rather than one call per lookup, for two reasons: auto-search
+    // fires on every 500ms typing pause, so one word can produce several
+    // lookups; and telemetry that adds a network round trip to the request
+    // it's measuring is measuring itself as much as anything else.
+    const LOOKUP_STATS_FLUSH_DELAY = 30000;
+    let lookupCounts = {};
+    let lookupFlushTimer = null;
+
+    function recordLookupOutcome(outcome) {
+      lookupCounts[outcome] = (lookupCounts[outcome] || 0) + 1;
+      if (lookupFlushTimer) return;
+      lookupFlushTimer = setTimeout(flushLookupCounts, LOOKUP_STATS_FLUSH_DELAY);
+    }
+
+    async function flushLookupCounts() {
+      clearTimeout(lookupFlushTimer);
+      lookupFlushTimer = null;
+      const batch = lookupCounts;
+      if (!currentSession || !Object.keys(batch).length) return;
+      // Cleared before the await, not after: a lookup finishing mid-flight
+      // should start the next batch rather than be counted twice or lost.
+      lookupCounts = {};
+      try {
+        await sb.rpc("record_lookup_outcomes", { counts: batch });
+      } catch (err) {
+        // Telemetry must never be able to break, or even be noticed by, the
+        // feature it watches. A dropped batch is an acceptable loss; a lookup
+        // failing because its counter couldn't be written is not.
+      }
+    }
+
+    // A tab closed or backgrounded before the timer fires would otherwise lose
+    // its batch — on a phone, "backgrounded" is how most sessions end.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushLookupCounts();
+    });
+
     // ---------- pronunciation ----------
     const CAN_SYNTHESISE_SPEECH =
       typeof window.speechSynthesis !== "undefined" &&
@@ -2176,14 +2242,26 @@
       const url = btn.dataset.audio;
       if (!url) { speakWord(word); return; }
 
-      let fellBack = false;
+      let settled = false;
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        recordLookupOutcome("audio_ok");
+      };
       const fallback = () => {
-        if (fellBack) return;
-        fellBack = true;
+        if (settled) return;
+        settled = true;
+        recordLookupOutcome("audio_failed");
         speakWord(word);
       };
 
       const audio = new Audio(url);
+      // Success is the "playing" event, NOT play() resolving. Some browsers
+      // resolve play() and only then fire "error" once the response turns out
+      // not to be audio — latching success on the promise would swallow that
+      // and leave the button silent, which is the bug this whole path exists
+      // to remove. "playing" fires only when sound actually starts.
+      audio.addEventListener("playing", succeed, { once: true });
       audio.addEventListener("error", fallback, { once: true });
       audio.play().catch(fallback);
     }
@@ -2238,6 +2316,10 @@
 
       if (!res.ok) {
         if (res.status >= 500 && retries > 0) {
+          // Counted here rather than at the outcome, because a rescued 5xx is
+          // reported to the user as a clean success — without this the retry
+          // hides the very outage it exists to survive.
+          recordLookupOutcome("retried");
           await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
           return fetchDictionaryEntry(word, { retries: retries - 1 });
         }
@@ -2286,6 +2368,10 @@
 
       try {
         const outcome = await fetchDictionaryEntry(word);
+        // Recorded before the superseded guard: a lookup that got overtaken
+        // still made a real request and still got a real answer, and dropping
+        // those would quietly bias the rate towards whatever finishes last.
+        recordLookupOutcome(outcome.found ? "ok" : "not_found");
         if (seq !== lookupSeq) return; // superseded by a newer lookup
 
         if (!outcome.found) {
@@ -2296,6 +2382,11 @@
         }
         render(outcome.result);
       } catch (err) {
+        recordLookupOutcome(
+          !navigator.onLine ? "offline"
+          : err.kind === "server" ? "server_error"
+          : "network_error"
+        );
         if (seq !== lookupSeq) return; // superseded by a newer lookup
         if (!(await shouldShowFailure(seq, word, auto))) return;
 
@@ -4797,6 +4888,100 @@
     // Feedback, newest first. Read-only: there is nothing to action here, so
     // there are no buttons — the reply happens in a mail client, and the row
     // exists so a message is never lost to a failed send.
+    // Lookup health. Answers "is the dictionary flaky today?" without anyone
+    // having to curl it by hand, which is how the 2026-08-11 outage was
+    // eventually diagnosed. Rows are per-user-per-day; everyone's are summed
+    // here, because the question is about the API's health, not any one
+    // person's. See supabase/sql/lookup-stats.sql.
+    function renderLookupStatsCard(rows, loadError) {
+      if (loadError) {
+        return `
+          <div class="admin-card">
+            <h2 class="admin-title">Lookup health</h2>
+            <p class="admin-req-status error">Couldn't load it: ${escapeHtml(loadError.message)}
+              ${/relation|does not exist|function/i.test(loadError.message || "")
+                ? " — supabase/sql/lookup-stats.sql may not have been run yet." : ""}</p>
+          </div>`;
+      }
+
+      // day -> {outcome: count}
+      const byDay = new Map();
+      for (const row of rows) {
+        if (!byDay.has(row.day)) byDay.set(row.day, {});
+        const bucket = byDay.get(row.day);
+        bucket[row.outcome] = (bucket[row.outcome] || 0) + row.count;
+      }
+      const days = [...byDay.keys()].sort().reverse().slice(0, 14);
+
+      if (!days.length) {
+        return `
+          <div class="admin-card">
+            <h2 class="admin-title">Lookup health</h2>
+            <p class="admin-lede">How the outbound calls are actually going. Counts only — never the words themselves.</p>
+            <p class="admin-empty">Nothing recorded yet. Look a word up and check back.</p>
+          </div>`;
+      }
+
+      const n = (bucket, key) => bucket[key] || 0;
+      // Every request that got an answer or failed trying. 'retried' is left
+      // out on purpose: it counts second attempts, so adding it would count
+      // those lookups twice.
+      const total = (b) => n(b,"ok") + n(b,"not_found") + n(b,"server_error") + n(b,"network_error") + n(b,"offline");
+
+      const today = byDay.get(days[0]) || {};
+      const todayTotal = total(today);
+      const theirFault = n(today,"server_error") + n(today,"retried");
+      const verdict = !todayTotal
+        ? "Nothing looked up yet today."
+        : theirFault === 0
+        ? "The dictionary is behaving today."
+        : `The dictionary is misbehaving today — <span class="stats-flag">${theirFault} call${theirFault === 1 ? "" : "s"} hit a 5xx</span> (${n(today,"retried")} rescued by the retry, ${n(today,"server_error")} gave up).`;
+
+      const audioOk = n(today,"audio_ok"), audioBad = n(today,"audio_failed");
+      const audioLine = (audioOk + audioBad) === 0
+        ? "No pronunciations played today."
+        : audioBad === 0
+        ? `Pronunciation: all ${audioOk} played from the dictionary.`
+        : `Pronunciation: ${audioOk} played, <span class="stats-flag">${audioBad} fell back</span> to the device voice.`;
+
+      const cell = (v, bad = false) =>
+        `<td class="${v === 0 ? "stats-zero" : bad ? "stats-bad" : ""}">${v}</td>`;
+
+      return `
+        <div class="admin-card">
+          <h2 class="admin-title">Lookup health</h2>
+          <p class="admin-lede">How the outbound calls are actually going, across everyone. Counts only — never the words themselves.</p>
+          <p class="stats-verdict">${verdict}</p>
+          <p class="stats-sub">${audioLine}</p>
+          <div class="stats-scroll">
+            <table class="stats-table">
+              <thead>
+                <tr>
+                  <th>Day</th><th>Lookups</th><th>Found</th><th>Not found</th>
+                  <th>Retried</th><th>5xx</th><th>No network</th><th>Audio ok</th><th>Audio fell back</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${days.map((day) => {
+                  const b = byDay.get(day);
+                  return `<tr>
+                    <td>${escapeHtml(day)}</td>
+                    ${cell(total(b))}
+                    ${cell(n(b,"ok"))}
+                    ${cell(n(b,"not_found"))}
+                    ${cell(n(b,"retried"), n(b,"retried") > 0)}
+                    ${cell(n(b,"server_error"), n(b,"server_error") > 0)}
+                    ${cell(n(b,"network_error") + n(b,"offline"))}
+                    ${cell(n(b,"audio_ok"))}
+                    ${cell(n(b,"audio_failed"), n(b,"audio_failed") > 0)}
+                  </tr>`;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
     function renderFeedbackCard(rows, loadError) {
       if (loadError) {
         return `
@@ -4948,7 +5133,7 @@
       // Invite list ordering unchanged: active rows (deleted_at is null) first,
       // deleted ones after, oldest addition first within each group so the
       // serial numbers read as a stable running log.
-      const [allowed, requests, codes, feedback] = await Promise.all([
+      const [allowed, requests, codes, feedback, stats] = await Promise.all([
         sb.from("allowed_emails")
           .select("email, added_at, deleted_at")
           .order("deleted_at", { ascending: true, nullsFirst: true })
@@ -4966,6 +5151,13 @@
           .select("id, email, message, app_version, created_at, emailed_at, email_error")
           .order("created_at", { ascending: false })
           .limit(50),
+        // Same independence again: lookup-stats.sql not having been run must
+        // not take the invite list down. 14 days is what the card shows; the
+        // row cap is generous headroom for several testers × 8 outcomes.
+        sb.from("lookup_stats")
+          .select("day, outcome, count")
+          .order("day", { ascending: false })
+          .limit(500),
       ]);
 
       if (allowed.error) {
@@ -4982,6 +5174,7 @@
           <button type="button" class="btn-signout admin-back">Back to Margin</button>
         </div>
         ${renderPendingCard(pending, ignored, requests.error)}
+        ${renderLookupStatsCard(stats.error ? [] : (stats.data || []), stats.error)}
         ${renderFeedbackCard(feedback.error ? [] : (feedback.data || []), feedback.error)}
         ${renderCodesCard(codes.error ? [] : (codes.data || []))}
         ${renderInviteCard(allowed.data, adminEmail)}
