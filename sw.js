@@ -2,7 +2,7 @@
 // Job in Phase 1: make the app installable and let the *shell* open offline.
 // It deliberately does NOT cache dictionary lookups (those need the live network).
 
-const CACHE = "margin-shell-v51";
+const CACHE = "margin-shell-v52";
 
 // Files that make up the app shell.
 const SHELL = [
@@ -14,9 +14,9 @@ const SHELL = [
   // including icon URLs. Replacing the bytes behind an unchanged filename is
   // invisible to that check, so a new icon can take days to appear or never
   // land at all. Change the suffix whenever the artwork changes.
-  "./icons/icon-192-v3.png",
-  "./icons/icon-512-v3.png",
-  "./icons/icon-maskable-512-v3.png",
+  "./icons/icon-192-v4.png",
+  "./icons/icon-512-v4.png",
+  "./icons/icon-maskable-512-v4.png",
 ];
 
 // The one cross-origin file the app shell can't start without -- without

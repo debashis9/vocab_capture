@@ -5,57 +5,178 @@
 </style>
 <body>
 <script>
-// Margin app icon — an oxblood margin rule down the left of a page, with a
-// Fraunces M standing in the writing area. Same serif texture as the old "V"
-// icon this replaced; the V simply became an M, and the margin rule was added
-// beside it.
+// Margin app icon (v4) -- the oxblood spine and the Fraunces "M." of v3,
+// standing on a field of blind-debossed letterforms.
 //
-// Two deliberate properties, both learned the hard way:
+// Export (Fraunces must be installed locally -- fc-list | grep -i fraunces):
+//   chrome --headless --disable-gpu --hide-scrollbars \
+//     --default-background-color=00000000 --virtual-time-budget=3000 \
+//     --window-size=512,512 --screenshot=icon-512-v4.png \
+//     "file://$PWD/icon-source.html?s=512"
+// ...and again with s=192, and with v=maskable for the maskable file.
+// Alpha matters: --default-background-color=00000000 is what keeps the rounded
+// corners transparent instead of baking a white square behind them.
+//
+// Three properties, each learned the hard way -- do not quietly "tidy" them:
+//   * The band runs flush to x=0 in BOTH variants. Insetting it to satisfy the
+//     maskable safe zone is what once left a strip of bare paper down its left
+//     edge on Android, which uses the maskable icon for the home screen. The
+//     safe zone constrains where CONTENT sits; an element that reads as an edge
+//     has to actually reach the edge.
 //   * The M is optically centred on the WHOLE tile, not on the paper area left
 //     over beside the band. Centring it in the leftover area pushes it right
-//     and opens a gap that reads as a mistake.
-//   * The band always runs flush to x=0. Insetting it to satisfy the maskable
-//     safe zone is what once left a strip of bare paper down its left edge on
-//     Android, since Android uses the maskable icon for the home screen.
+//     and opens a gap that reads as a mistake. The full stop hangs off its
+//     right rather than shifting it, so the M itself still lands on x=256.
+//   * The maskable variant is the same drawing scaled about the centre, not a
+//     re-layout, so the two cannot drift apart the next time either is touched.
 //
-// ?v=any|maskable   &s=<pixel size>
+// What makes the design work, and the thing to protect if it is ever edited:
+// the cloud is BLIND debossed -- pressed into the paper with no ink at all, so
+// it is tone only -- while the M is the single inked mark and is pressed
+// deeper. That is a difference in kind, not just in size, and it is why the M
+// still reads at 24px once the cloud has collapsed into texture. Verified by
+// rendering both at 24/32/48/64/96 on pale and dark grounds before shipping.
+//
+// ?v=any|maskable  &s=<pixel size>  &seed=<int>  &density=<int>  &halo=0|1
 const q = new URLSearchParams(location.search);
-const variant = q.get("v") || "any";
-const size = parseInt(q.get("s") || "512", 10);
+const variant  = q.get("v") || "any";
+const size     = parseInt(q.get("s") || "512", 10);
+// seed 7 / density 9 is what ships. Other seeds are perfectly good layouts --
+// this one was chosen because its letters happen to fall small right around the
+// M, so the silhouette stays clean without needing the halo below.
+const seed     = parseInt(q.get("seed") || "7", 10);
+const density  = parseInt(q.get("density") || "9", 10);  // rows down the tile
+// Off. Clears a margin of blank paper around the M by shrinking the letters
+// nearest it -- insurance if a future change makes the M harder to pick out.
+const halo     = q.get("halo") === "1";
 
 const PAPER = "#FBF9F4", OX = "#8A3033";
+const CLOUD_FILL = "#E7DFCF";   // a recess, not a mark -- but deep enough to read
+const CLOUD_DARK = "#B4A88F";   // upper-left wall of the impression
+const CLOUD_LITE = "#FFFFFF";   // lower-right wall, catching the light
 
-// The whole composition, as one set of numbers. The maskable variant is the
-// same drawing scaled to 0.8 about the centre so it survives an aggressive
-// circular crop -- keeping it a scale rather than a re-layout is what stops the
-// two icons drifting apart the next time either is touched.
+// Deterministic, so the same seed always draws the same cloud. An icon you
+// cannot re-derive is a mystery binary; that is what this file exists to avoid.
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// The whole composition, as one set of numbers.
 function composition(scale) {
   const at = (x) => 256 + (x - 256) * scale;
   return {
     // The band's RIGHT edge is what scales; its left edge stays pinned at x=0
-    // rather than scaling to 51, which is the whole point above.
-    band: at(96),
-    mSize: 280 * scale,
-    mCx: at(256),              // dead centre either way
-    mBy: at(358),
+    // rather than scaling to 51, which is the first of the three points above.
+    band:  at(96),
+    mSize: 266 * scale,
+    mCx:   at(256),            // dead centre either way
+    mBy:   at(360),
   };
+}
+
+const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".split("");
+const ANGLES = [0, 0, 0, 0, 90, -90, 180, 90, -90, 18, -18, 38, -38, 122, -122];
+
+// A jittered grid rather than true interlocking packing: once the sizes vary
+// this much it reads the same, and unlike a packing algorithm it is analysable,
+// so the halo knob can actually know what it is moving.
+function cloud(rng) {
+  const rows  = density;
+  const cellH = 512 / rows;
+  const cols  = Math.round(512 / cellH) + 1;
+  const cellW = 512 / (cols - 1);
+  const out = [];
+  // Start a row and a column outside the tile so the field is cropped by the
+  // edges instead of stopping at them -- an endless page, not a motif.
+  for (let r = -1; r <= rows; r++) {
+    for (let c = -1; c <= cols; c++) {
+      const cx = c * cellW + cellW / 2 + (rng() - 0.5) * cellW * 0.55;
+      const cy = r * cellH + cellH / 2 + (rng() - 0.5) * cellH * 0.5;
+      let fs = cellH * (0.62 + rng() * 1.05);
+      const rot = ANGLES[Math.floor(rng() * ANGLES.length)];
+      const ch  = GLYPHS[Math.floor(rng() * GLYPHS.length)];
+      if (halo) {
+        const dx = Math.max(0, Math.abs(cx - 256) - 150);
+        const dy = Math.max(0, Math.abs(cy - 270) - 115);
+        const d  = Math.hypot(dx, dy);
+        if (d < 1) continue;
+        if (d < 70) fs *= 0.45 + (d / 70) * 0.55;
+      }
+      out.push({ cx, cy, fs, rot, ch });
+    }
+  }
+  return out;
 }
 
 function art(maskable) {
   const c = composition(maskable ? 0.8 : 1);
+  const rng = mulberry32(seed);
+
   const bg = maskable
     ? `<rect width="512" height="512" fill="${PAPER}"/>`
     : `<rect width="512" height="512" rx="115" fill="${PAPER}"/>`;
+
+  const letters = cloud(rng).map(g =>
+    `<text x="${g.cx.toFixed(1)}" y="${g.cy.toFixed(1)}" font-family="Fraunces" font-weight="600"
+       font-size="${g.fs.toFixed(1)}" fill="${CLOUD_FILL}" text-anchor="middle"
+       transform="rotate(${g.rot} ${g.cx.toFixed(1)} ${g.cy.toFixed(1)})">${g.ch}</text>`
+  ).join("");
+
   return bg
+    + `<g filter="url(#press)">${letters}</g>`
+    // The band sits ON TOP of the cloud, so the field is cut mid-letter at its
+    // edge and the page reads as continuing underneath the spine. It is left
+    // plain: debossed rules across it were tried and read as scratches at any
+    // size small enough to matter.
     + `<rect x="0" y="0" width="${c.band}" height="512" fill="${OX}"/>`
-    + `<text x="${c.mCx}" y="${c.mBy}" font-family="Fraunces" font-weight="700"
-         font-size="${c.mSize}" fill="${OX}" text-anchor="middle">M</text>`;
+    // The full stop is its own element at 0.78 of the M rather than a character
+    // in the same string. At this scale Fraunces' own period is a heavy ball
+    // that competes with the M; the masthead's dot reads as punctuation only
+    // because a whole word sits beside it, and nothing here does.
+    + `<g filter="url(#pressDeep)">`
+    + `<text id="mark" x="${c.mCx}" y="${c.mBy}" font-family="Fraunces"
+         font-weight="700" font-size="${c.mSize}" fill="${OX}" text-anchor="middle">M</text>`
+    + `<text id="dot" x="${c.mCx}" y="${c.mBy}" font-family="Fraunces"
+         font-weight="700" font-size="${(c.mSize * 0.78).toFixed(1)}" fill="${OX}">.</text>`
+    + `</g>`;
 }
 
 const maskable = variant === "maskable";
 document.body.insertAdjacentHTML("beforeend",
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">
-     <defs><clipPath id="r"><rect width="512" height="512" rx="${maskable ? 0 : 115}"/></clipPath></defs>
+     <defs>
+       <clipPath id="r"><rect width="512" height="512" rx="${maskable ? 0 : 115}"/></clipPath>
+       <!-- Pressed IN, not raised: shadow on the upper-left inner wall, the
+            lower-right wall catching the light. Swap the two offsets and the
+            whole thing pops out of the paper instead. -->
+       <filter id="press" x="-12%" y="-12%" width="124%" height="124%">
+         <feDropShadow dx="-1.4" dy="-1.4" stdDeviation="0.35" flood-color="${CLOUD_DARK}" flood-opacity="1"/>
+         <feDropShadow dx="1.8" dy="1.8" stdDeviation="0.4" flood-color="${CLOUD_LITE}" flood-opacity="1"/>
+       </filter>
+       <!-- Same light, deeper bite: this is the inked mark. -->
+       <filter id="pressDeep" x="-12%" y="-12%" width="124%" height="124%">
+         <feDropShadow dx="-2.2" dy="-2.2" stdDeviation="0.6" flood-color="#A79A84" flood-opacity="1"/>
+         <feDropShadow dx="2.4" dy="2.4" stdDeviation="0.8" flood-color="${CLOUD_LITE}" flood-opacity="0.8"/>
+       </filter>
+     </defs>
      <g clip-path="url(#r)">${art(maskable)}</g>
    </svg>`);
+
+// The M keeps x=256 dead centre; the dot is measured onto its right-hand edge
+// rather than guessed, since where the M's stem actually ends depends on the
+// font in use and this file must not silently drift if that ever changes.
+(function placeTheDot() {
+  const m = document.getElementById("mark");
+  const d = document.getElementById("dot");
+  if (!m || !d || !m.getBBox) return;
+  const box = m.getBBox();
+  const gap = parseFloat(m.getAttribute("font-size")) * 0.045;
+  d.setAttribute("x", (box.x + box.width + gap).toFixed(1));
+  document.documentElement.dataset.ready = "1";
+})();
 </script>
