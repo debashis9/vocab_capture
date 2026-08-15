@@ -1404,14 +1404,19 @@
          can't get in has the request-access form for that instead. -->
     <section id="feedback-panel" class="feedback" hidden>
       <h2 class="feedback-title">Tell me what you think</h2>
-      <p class="feedback-lede">Something broken, something missing, or something that just
-        feels wrong to use — all of it is useful. It comes straight to me.</p>
+      <p class="feedback-lede">Something you liked, something you'd change, something
+        missing, something broken — all of it is useful. It comes straight to me.</p>
       <form id="feedback-form">
         <label class="feedback-label" for="feedback-text">Your message</label>
         <textarea id="feedback-text" rows="5" maxlength="2000" required
-          placeholder="What happened, or what would you change?"></textarea>
-        <p class="feedback-note">Sent with your email address, so I can reply, and your
-          browser details, so I can reproduce a bug.</p>
+          placeholder="What's working well, what isn't, or what you'd change?"></textarea>
+        <!-- Disclosure, not a request: both of these ride along automatically, so
+             the line says so plainly. It used to read "Sent with your email
+             address... and your browser details", which people took as an
+             instruction to type them into the box. -->
+        <p class="feedback-note">Nothing else to fill in — your email address (so I can
+          reply) and your browser details (so I can reproduce a bug) come along
+          automatically.</p>
         <div class="feedback-actions">
           <button type="submit" id="feedback-send">Send</button>
           <button type="button" id="feedback-cancel" class="btn-signout">Cancel</button>
@@ -2286,11 +2291,12 @@
     // Failures carry err.kind: "server" (they answered, badly) or "network"
     // (we never got an answer at all).
     //
-    // Measured 2026-08-11: their CDN serves cached entries fine while
-    // anything that has to reach their origin comes back 502/500 about 40%
-    // of the time — a not-found lookup, or a pronunciation file. Hence the
-    // retry: the endpoint answers in ~250ms, so a second round trip is
-    // cheap, and one retry takes a ~40% failure rate down to ~16%.
+    // Measured 2026-08-11, and still true on 2026-08-15: their CDN serves
+    // cached entries fine while anything that has to reach their origin comes
+    // back 502/500 about half the time — a not-found lookup, or a
+    // pronunciation file. Hence the retry: the endpoint answers in ~250ms, so
+    // a second round trip is cheap, and one retry takes a ~40% failure rate
+    // down to ~16%.
     const DICTIONARY_RETRY_DELAY = 400;
 
     function dictionaryError(kind, message) {
@@ -2298,6 +2304,22 @@
       err.kind = kind;
       return err;
     }
+
+    // Set when the page is genuinely going away (reload, navigation, close).
+    // Every in-flight fetch is rejected at that moment, which is NOT a network
+    // failure but was being counted as one — two of the five network_errors on
+    // record by 2026-08-15 were most likely this, which is exactly the
+    // ambiguity that made the bucket hard to read.
+    //
+    // "pagehide", not "visibilitychange": backgrounding a tab on a phone fires
+    // visibilitychange and then keeps running, so using that would stop
+    // counting real failures for the rest of the session. This is a heuristic —
+    // it relies on pagehide landing before the fetch rejects, which is the
+    // normal ordering but isn't guaranteed — so it can undercount slightly. That
+    // is the right way to be wrong: a bucket that means what it says is worth
+    // more than one that catches every last event.
+    let pageUnloading = false;
+    window.addEventListener("pagehide", () => { pageUnloading = true; });
 
     async function fetchDictionaryEntry(word, { retries = 1 } = {}) {
       let res;
@@ -2309,6 +2331,19 @@
         // fetch() only rejects when the request never completed — DNS,
         // TLS, offline, connection reset. A real HTTP status, however bad,
         // resolves and is handled below.
+        if (pageUnloading) throw dictionaryError("abandoned", "page went away");
+
+        // Retried for the same reason a 5xx is: their origin is unhealthy, and
+        // a reset connection is every bit as transient as a 502. Skipped when
+        // the browser knows it's offline — there's nothing to rescue, and the
+        // delay would only postpone the "Save for later" offer. (navigator.onLine
+        // is trusted in this one direction only: it lies by claiming to be
+        // online, not by claiming to be offline.)
+        if (retries > 0 && navigator.onLine) {
+          recordLookupOutcome("retried");
+          await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
+          return fetchDictionaryEntry(word, { retries: retries - 1 });
+        }
         throw dictionaryError("network", err.message || "network request failed");
       }
 
@@ -2382,11 +2417,16 @@
         }
         render(outcome.result);
       } catch (err) {
-        recordLookupOutcome(
-          !navigator.onLine ? "offline"
-          : err.kind === "server" ? "server_error"
-          : "network_error"
-        );
+        // "abandoned" is recorded as nothing at all: the page is being torn
+        // down, so the lookup never got an answer either way, and counting it
+        // as a failure is what made network_error hard to trust.
+        if (err.kind !== "abandoned") {
+          recordLookupOutcome(
+            !navigator.onLine ? "offline"
+            : err.kind === "server" ? "server_error"
+            : "network_error"
+          );
+        }
         if (seq !== lookupSeq) return; // superseded by a newer lookup
         if (!(await shouldShowFailure(seq, word, auto))) return;
 
