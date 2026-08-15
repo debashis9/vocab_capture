@@ -204,7 +204,6 @@
       background: var(--paper); color: var(--ink);
     }
     .feedback textarea:focus-visible { outline: 2px solid var(--oxblood); outline-offset: 1px; }
-    .feedback-note { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
     .feedback-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
     #feedback-status { margin: 12px 0 0; }
 
@@ -1410,13 +1409,13 @@
         <label class="feedback-label" for="feedback-text">Your message</label>
         <textarea id="feedback-text" rows="5" maxlength="2000" required
           placeholder="What's working well, what isn't, or what you'd change?"></textarea>
-        <!-- Disclosure, not a request: both of these ride along automatically, so
-             the line says so plainly. It used to read "Sent with your email
-             address... and your browser details", which people took as an
-             instruction to type them into the box. -->
-        <p class="feedback-note">Nothing else to fill in — your email address (so I can
-          reply) and your browser details (so I can reproduce a bug) come along
-          automatically.</p>
+        <!-- No note under the box on purpose. Two attempts at one both read as
+             an instruction to type something ("Sent with your email address..."
+             then "Nothing else to fill in..."), because anything sitting in that
+             slot looks like part of the form. What it disclosed -- that the email
+             address and browser details ride along -- lives in guide.html's
+             "what leaves your device" list, which is where the rest of the
+             privacy disclosure already is. -->
         <div class="feedback-actions">
           <button type="submit" id="feedback-send">Send</button>
           <button type="button" id="feedback-cancel" class="btn-signout">Cancel</button>
