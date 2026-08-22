@@ -1101,7 +1101,15 @@
          stopping halfway across with the saved-words column sitting past the
          end — which reads as a broken layout, not as a measure. Only things
          made of sentences are capped. */
-      #auth-section, #faq-panel, #feedback-panel, #admin-section { max-width: 620px; }
+      #auth-section, #faq-panel, #feedback-panel { max-width: 620px; }
+      /* The admin screen keeps the same reading measure, but per child rather
+         than on the section, so one child can opt out of it. That child is the
+         lookup-health card: it's a table, not sentences, and it grew to
+         thirteen columns on 2026-08-22. At 620px its last four sat off the
+         edge of a 1280px screen with room going spare. It still scrolls inside
+         .stats-scroll on a phone; this only spends space that already exists. */
+      #admin-section > * { max-width: 620px; }
+      #admin-section > .admin-card:has(.stats-table) { max-width: none; }
       .update-banner { max-width: 620px; }
 
       /* :not([hidden]) matters. `display: grid` on the bare id would beat the
@@ -2148,7 +2156,9 @@
     //
     // COUNTS ONLY, NEVER THE WORD. Deliberate: this must not become a log of
     // everything typed into the box. It's why guide.html's privacy list needs
-    // no new line.
+    // no new line -- and it's the test any new counter has to pass too. The
+    // three feature counters (ai_lookup, voice_input, scan_used) record that
+    // something was used, never what it was used on.
     //
     // Buffered rather than one call per lookup, for two reasons: auto-search
     // fires on every 500ms typing pause, so one word can produce several
@@ -2816,6 +2826,7 @@
     }
 
     async function fetchAI() {
+      recordLookupOutcome("ai_lookup");
       aiLoading = true;
       aiError = null;
       updateTabBody();
@@ -3604,6 +3615,7 @@
       };
 
       recognition.addEventListener("result", (e) => {
+        recordLookupOutcome("voice_input");
         // Chrome tacks sentence punctuation onto single-word results (e.g. "incessant.") — strip it.
         $("word").value = e.results[0][0].transcript.trim().replace(/[.,!?;:]+$/, "");
         $("word").focus();
@@ -3730,6 +3742,13 @@
         if (!file) return;
         const img = new Image();
         img.onload = () => { processCapturedImage(img); img.remove(); };
+        // Without this, a photo the browser can't decode (a HEIC where HEIC
+        // isn't supported, a truncated file) does nothing whatsoever -- onload
+        // never fires and the chooser just sits there looking ignored.
+        img.onerror = () => {
+          img.remove();
+          renderCameraError("Couldn't open that photo. Try a different one, or take a new picture.");
+        };
         img.src = URL.createObjectURL(file);
       });
     }
@@ -3749,7 +3768,19 @@
       `;
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        $("camera-preview").srcObject = cameraStream;
+        const video = $("camera-preview");
+        // The scan screen can be closed while getUserMedia is still sitting on
+        // the permission prompt -- if it was, there's nothing left to attach to.
+        if (!video) { stopCamera(); return; }
+        video.srcObject = cameraStream;
+        // iOS Safari does not reliably autoplay a srcObject stream. Without an
+        // explicit play() the element can sit at readyState 0 indefinitely,
+        // which looks exactly like a broken camera. A no-op everywhere else.
+        video.play().catch(() => {});
+        const ready = await markCaptureReady(video, $("camera-capture"));
+        if (!ready && document.body.contains(video)) {
+          renderCameraError("The camera started but never sent a picture. Try again, or choose a photo instead.");
+        }
       } catch (err) {
         renderCameraError(
           err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
@@ -3790,27 +3821,184 @@
       `;
     }
 
-    // Shared by both capture methods (live video frame or an uploaded
-    // image) -- draws to a working canvas at CROP_SOURCE_MAX_DIMENSION (not
-    // yet the OCR upload -- that downscale happens later, after cropping)
-    // and hands off to the crop-selection screen. `source` is anything
-    // drawImage() accepts (a <video> or an <img>/ImageBitmap).
+    // ---- shared capture helpers (both the page scan and the book scan) ----
+    //
+    // Two real failures on real phones, found 2026-08-22, and they are the
+    // same bug at two different stages: capturing before there was anything
+    // to capture.
+    //
+    //   * Android. The first Capture after opening the camera produced a
+    //     solid black photo; pressing Capture again worked. A <video> reports
+    //     videoWidth/videoHeight as soon as METADATA arrives, but drawImage()
+    //     paints nothing at all until a frame has actually been decoded
+    //     (readyState >= HAVE_CURRENT_DATA). The canvas therefore stayed
+    //     fully transparent, and transparent encodes to black as JPEG -- so
+    //     the crop screen showed a correctly-sized, entirely black rectangle.
+    //
+    //   * iOS. The crop screen showed a broken-image placeholder in a
+    //     collapsed strip. Same cause one step earlier: no frame at all meant
+    //     videoWidth was still 0, so the canvas was 0x0 and toDataURL()
+    //     returned the literal string "data:," -- which is not an image, so
+    //     the <img> pointed at it simply failed to load.
+    //
+    // The fix is in three parts, and all three are needed: wait for a real
+    // frame before drawing, check afterwards that something was actually
+    // painted, and never put a canvas or a data URL on screen without
+    // confirming it is usable.
+    const CAPTURE_FRAME_TIMEOUT = 5000; // how long to wait for a first frame
+    const CAPTURE_RETRY_DELAY = 250;    // between re-grabs of a blank frame
+    const CAPTURE_MAX_TRIES = 4;
+
+    const waitMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    function isVideoSource(source) {
+      return typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement;
+    }
+
+    // HAVE_CURRENT_DATA (2) is the first readyState at which there is a frame
+    // for drawImage to copy. Checking videoWidth alone is NOT enough -- that's
+    // set at HAVE_METADATA (1), which is exactly the window the Android black
+    // photo fell into.
+    function videoHasFrame(video) {
+      return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+    }
+
+    function waitForVideoFrame(video, timeoutMs = CAPTURE_FRAME_TIMEOUT) {
+      if (videoHasFrame(video)) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (ready) => {
+          if (settled) return;
+          settled = true;
+          clearInterval(poll);
+          clearTimeout(giveUp);
+          video.removeEventListener("loadeddata", check);
+          resolve(ready);
+        };
+        const check = () => { if (videoHasFrame(video)) finish(true); };
+        // Polling as well as listening on purpose: with a live MediaStream
+        // "loadeddata" has sometimes already fired by the time this runs, and
+        // a missed event would otherwise stall here until the timeout.
+        const poll = setInterval(check, 60);
+        const giveUp = setTimeout(() => finish(videoHasFrame(video)), timeoutMs);
+        video.addEventListener("loadeddata", check);
+      });
+    }
+
+    // Did drawImage actually paint anything? A canvas that was never drawn to
+    // is fully TRANSPARENT, while a drawn video frame or photo is fully
+    // opaque -- so an alpha of zero is a precise test with no false positives.
+    //
+    // For a live video there is a second case alpha misses: a camera that has
+    // started but not yet exposed emits a genuinely opaque black frame.
+    // Sampled pixels being byte-for-byte identical catches that. It is applied
+    // ONLY to video, because a real sensor frame always carries some noise,
+    // whereas an uploaded file could legitimately be a flat colour.
+    function canvasLooksBlank(canvas, alsoRejectFlat) {
+      if (!canvas.width || !canvas.height) return true;
+      let samples;
+      try {
+        const ctx = canvas.getContext("2d");
+        samples = [];
+        for (let row = 1; row <= 5; row++) {
+          for (let col = 1; col <= 5; col++) {
+            const x = Math.min(canvas.width - 1, Math.floor((canvas.width * col) / 6));
+            const y = Math.min(canvas.height - 1, Math.floor((canvas.height * row) / 6));
+            samples.push(ctx.getImageData(x, y, 1, 1).data);
+          }
+        }
+      } catch (err) {
+        // Nothing here taints the canvas (a getUserMedia stream doesn't, nor
+        // does a same-origin blob), so this shouldn't happen -- but if the
+        // pixels can't be read, assume good rather than block a real capture.
+        return false;
+      }
+      if (samples.every((px) => px[3] === 0)) return true;
+      if (!alsoRejectFlat) return false;
+      const first = samples[0];
+      return samples.every((px) => px[0] === first[0] && px[1] === first[1] && px[2] === first[2]);
+    }
+
+    // Draws `source` onto a fresh canvas, at most maxDimension on its long
+    // edge. Returns null if the source has no dimensions to draw yet.
+    // `source` is anything drawImage() accepts (a <video> or an <img>).
+    function drawSourceToCanvas(source, maxDimension) {
+      const naturalWidth = source.videoWidth || source.naturalWidth || source.width;
+      const naturalHeight = source.videoHeight || source.naturalHeight || source.height;
+      if (!naturalWidth || !naturalHeight) return null;
+      const scale = Math.min(1, maxDimension / Math.max(naturalWidth, naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(naturalWidth * scale);
+      canvas.height = Math.round(naturalHeight * scale);
+      canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+      return canvas;
+    }
+
+    // The whole capture, with the readiness and blank-frame handling above.
+    // Retrying is deliberately silent: the Android failure was a first frame
+    // that simply hadn't arrived yet, and quietly waiting 250ms for the next
+    // one is a better answer than asking someone to press Capture again.
+    // Returns the canvas, or null if nothing usable ever arrived.
+    async function captureStillFrom(source, maxDimension) {
+      const isVideo = isVideoSource(source);
+      const tries = isVideo ? CAPTURE_MAX_TRIES : 1;
+      for (let attempt = 0; attempt < tries; attempt++) {
+        if (isVideo && !(await waitForVideoFrame(source))) break;
+        const canvas = drawSourceToCanvas(source, maxDimension);
+        if (canvas && !canvasLooksBlank(canvas, isVideo)) return canvas;
+        if (attempt < tries - 1) await waitMs(CAPTURE_RETRY_DELAY);
+      }
+      return null;
+    }
+
+    // toDataURL is the other half of the iOS failure: a 0x0 canvas returns the
+    // string "data:," and an <img> pointed at that shows a broken-image icon.
+    // Anything that isn't plausibly an encoded image is treated as a failed
+    // capture rather than being put on screen. Returns null on failure.
+    function canvasToImageDataUrl(canvas, quality) {
+      let dataUrl = "";
+      try {
+        dataUrl = canvas.toDataURL("image/jpeg", quality);
+      } catch (err) {
+        return null;
+      }
+      if (!/^data:image\/[a-z]+;base64,/.test(dataUrl) || dataUrl.length < 512) return null;
+      return dataUrl;
+    }
+
+    // Keeps Capture disabled until there is actually a frame behind the
+    // preview. Cheaper than explaining a black photo after the fact, and it
+    // makes the wait visible rather than looking like a frozen camera.
+    // Returns whether a frame ever arrived.
+    async function markCaptureReady(video, button) {
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Starting camera…";
+      }
+      const ready = await waitForVideoFrame(video);
+      if (button && document.body.contains(button)) {
+        button.disabled = !ready;
+        button.textContent = "Capture";
+      }
+      return ready;
+    }
+
+    // Hands a captured still off to the crop-selection screen. The downscale
+    // to CROP_SOURCE_MAX_DIMENSION here is NOT the OCR upload -- that second,
+    // tighter downscale happens later, after cropping.
     let currentCropCanvas = null; // the full (uncropped) working canvas for the current capture
     let cropSelection = null; // {left, top, width, height} in percent, or null (= whole photo)
 
     async function processCapturedImage(source) {
+      // stopCamera() AFTER the capture, not before: captureStillFrom may need
+      // to wait for a frame and re-grab, which a stopped track can't supply.
+      const canvas = await captureStillFrom(source, CROP_SOURCE_MAX_DIMENSION);
       stopCamera(); // safe even if source wasn't the live video -- no-op then
 
-      const naturalWidth = source.videoWidth || source.naturalWidth || source.width;
-      const naturalHeight = source.videoHeight || source.naturalHeight || source.height;
-      const scale = Math.min(1, CROP_SOURCE_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
-      const width = Math.round(naturalWidth * scale);
-      const height = Math.round(naturalHeight * scale);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      canvas.getContext("2d").drawImage(source, 0, 0, width, height);
+      if (!canvas) {
+        renderCameraError("That photo came out blank. Give the camera a second to focus, then try again — or choose a photo instead.");
+        return;
+      }
 
       currentCropCanvas = canvas;
       renderCropChooser(canvas);
@@ -3819,7 +4007,11 @@
     // ---- crop-selection screen: drag over a paragraph, or scan the whole photo ----
     function renderCropChooser(canvas) {
       cropSelection = null;
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      const dataUrl = canvasToImageDataUrl(canvas, 0.85);
+      if (!dataUrl) {
+        renderCameraError("Couldn't read that photo. Try again, or choose a different one.");
+        return;
+      }
       $("camera-body").innerHTML = `
         <div class="practice-head">
           <h2 class="saved-title">Frame a paragraph</h2>
@@ -3835,6 +4027,12 @@
           <button id="crop-whole" type="button" class="btn-practice-nav">Scan whole photo</button>
         </div>
       `;
+      // Last line of defence for the iOS broken-image strip: if the browser
+      // still can't decode what we just encoded, say so plainly rather than
+      // leaving a broken placeholder with two Scan buttons underneath it.
+      $("crop-image").addEventListener("error", () => {
+        renderCameraError("Couldn't display that photo. Try again, or choose a different one.");
+      });
       wireCropSelection();
       // Put the photo at the top of the screen rather than wherever the page
       // happened to be scrolled to -- on a phone the crop screen starts well
@@ -3956,9 +4154,14 @@
       // pixel-dimension-identical, or the overlay math misaligns -- so the
       // same canvas' data URL is what gets shown later, at this same
       // width/height, not the source's original resolution.
-      const dataUrl = cropped.toDataURL("image/jpeg", 0.8);
+      const dataUrl = canvasToImageDataUrl(cropped, 0.8);
+      if (!dataUrl) {
+        renderCameraError("Couldn't prepare that photo to scan. Try again, or choose a different one.");
+        return;
+      }
       const base64 = dataUrl.split(",")[1];
 
+      recordLookupOutcome("scan_used");
       renderCameraLoading();
       await streamOcrWords(dataUrl, width, height, base64);
     }
@@ -4266,6 +4469,10 @@
         if (!file) return;
         const img = new Image();
         img.onload = () => { processBookPhoto(img); img.remove(); };
+        img.onerror = () => {
+          img.remove();
+          renderLibraryError("Couldn't open that photo. Try a different one, or take a new picture.");
+        };
         img.src = URL.createObjectURL(file);
       });
     }
@@ -4284,7 +4491,16 @@
       `;
       try {
         libraryStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        $("library-preview").srcObject = libraryStream;
+        const video = $("library-preview");
+        if (!video) { stopLibraryCamera(); return; }
+        video.srcObject = libraryStream;
+        // See openCameraLivePreview() for why the explicit play() and the
+        // readiness gate are both needed -- identical failures apply here.
+        video.play().catch(() => {});
+        const ready = await markCaptureReady(video, $("library-capture"));
+        if (!ready && document.body.contains(video)) {
+          renderLibraryError("The camera started but never sent a picture. Try again, or choose a photo instead.");
+        }
       } catch (err) {
         renderLibraryError(
           err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
@@ -4325,19 +4541,21 @@
     }
 
     async function processBookPhoto(source) {
+      // Same ordering rule as processCapturedImage(): capture first, stop the
+      // camera afterwards, or a retry has no stream left to re-grab from.
+      const canvas = await captureStillFrom(source, BOOK_PHOTO_MAX_DIMENSION);
       stopLibraryCamera();
 
-      const naturalWidth = source.videoWidth || source.naturalWidth || source.width;
-      const naturalHeight = source.videoHeight || source.naturalHeight || source.height;
-      const scale = Math.min(1, BOOK_PHOTO_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
-      const width = Math.round(naturalWidth * scale);
-      const height = Math.round(naturalHeight * scale);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      canvas.getContext("2d").drawImage(source, 0, 0, width, height);
-      const base64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+      if (!canvas) {
+        renderLibraryError("That photo came out blank. Give the camera a second to focus, then try again — or choose a photo instead.");
+        return;
+      }
+      const dataUrl = canvasToImageDataUrl(canvas, 0.8);
+      if (!dataUrl) {
+        renderLibraryError("Couldn't read that photo. Try again, or choose a different one.");
+        return;
+      }
+      const base64 = dataUrl.split(",")[1];
 
       renderLibraryLoading();
 
@@ -4943,12 +5161,17 @@
           </div>`;
       }
 
-      // day -> {outcome: count}
+      // day -> { counts: {outcome: count}, people: Set(user_id) }
       const byDay = new Map();
       for (const row of rows) {
-        if (!byDay.has(row.day)) byDay.set(row.day, {});
+        if (!byDay.has(row.day)) byDay.set(row.day, { counts: {}, people: new Set() });
         const bucket = byDay.get(row.day);
-        bucket[row.outcome] = (bucket[row.outcome] || 0) + row.count;
+        bucket.counts[row.outcome] = (bucket.counts[row.outcome] || 0) + row.count;
+        // Distinct accounts active that day. The table's primary key is
+        // (user_id, day, outcome), so one person appears once per outcome they
+        // hit -- the Set is what turns that back into a headcount. The id
+        // itself is only ever counted, never rendered.
+        if (row.user_id) bucket.people.add(row.user_id);
       }
       const days = [...byDay.keys()].sort().reverse().slice(0, 14);
 
@@ -4961,13 +5184,16 @@
           </div>`;
       }
 
-      const n = (bucket, key) => bucket[key] || 0;
-      // Every request that got an answer or failed trying. 'retried' is left
-      // out on purpose: it counts second attempts, so adding it would count
-      // those lookups twice.
+      const n = (bucket, key) => bucket.counts[key] || 0;
+      // Every dictionary request that got an answer or failed trying.
+      // 'retried' is left out on purpose: it counts second attempts, so adding
+      // it would count those lookups twice. The three feature counters
+      // (ai_lookup, voice_input, scan_used) are left out for a different
+      // reason -- they aren't dictionary calls, and folding them in would
+      // make the success rate below meaningless.
       const total = (b) => n(b,"ok") + n(b,"not_found") + n(b,"server_error") + n(b,"network_error") + n(b,"offline");
 
-      const today = byDay.get(days[0]) || {};
+      const today = byDay.get(days[0]) || { counts: {}, people: new Set() };
       const todayTotal = total(today);
       const theirFault = n(today,"server_error") + n(today,"retried");
       const verdict = !todayTotal
@@ -4975,6 +5201,15 @@
         : theirFault === 0
         ? "The dictionary is behaving today."
         : `The dictionary is misbehaving today — <span class="stats-flag">${theirFault} call${theirFault === 1 ? "" : "s"} hit a 5xx</span> (${n(today,"retried")} rescued by the retry, ${n(today,"server_error")} gave up).`;
+
+      // What people actually reached for today, beside the plain dictionary
+      // box. Counts of use, never of what was used on -- see the note above
+      // record_lookup_outcomes' allowlist.
+      const peopleToday = today.people.size;
+      const featureLine = `Today: ${peopleToday} ${peopleToday === 1 ? "person" : "people"}`
+        + ` · AI tab ${n(today,"ai_lookup")}`
+        + ` · voice ${n(today,"voice_input")}`
+        + ` · page scans ${n(today,"scan_used")}`;
 
       const audioOk = n(today,"audio_ok"), audioBad = n(today,"audio_failed");
       const audioLine = (audioOk + audioBad) === 0
@@ -4992,12 +5227,15 @@
           <p class="admin-lede">How the outbound calls are actually going, across everyone. Counts only — never the words themselves.</p>
           <p class="stats-verdict">${verdict}</p>
           <p class="stats-sub">${audioLine}</p>
+          <p class="stats-sub">${featureLine}</p>
           <div class="stats-scroll">
             <table class="stats-table">
               <thead>
                 <tr>
-                  <th>Day</th><th>Lookups</th><th>Found</th><th>Not found</th>
-                  <th>Retried</th><th>5xx</th><th>No network</th><th>Audio ok</th><th>Audio fell back</th>
+                  <th>Day</th><th>People</th><th>Lookups</th><th>Found</th><th>Not found</th>
+                  <th>Retried</th><th>5xx</th><th>No network</th>
+                  <th>AI tab</th><th>Voice</th><th>Scans</th>
+                  <th>Audio ok</th><th>Audio fell back</th>
                 </tr>
               </thead>
               <tbody>
@@ -5005,12 +5243,16 @@
                   const b = byDay.get(day);
                   return `<tr>
                     <td>${escapeHtml(day)}</td>
+                    ${cell(b.people.size)}
                     ${cell(total(b))}
                     ${cell(n(b,"ok"))}
                     ${cell(n(b,"not_found"))}
                     ${cell(n(b,"retried"), n(b,"retried") > 0)}
                     ${cell(n(b,"server_error"), n(b,"server_error") > 0)}
                     ${cell(n(b,"network_error") + n(b,"offline"))}
+                    ${cell(n(b,"ai_lookup"))}
+                    ${cell(n(b,"voice_input"))}
+                    ${cell(n(b,"scan_used"))}
                     ${cell(n(b,"audio_ok"))}
                     ${cell(n(b,"audio_failed"), n(b,"audio_failed") > 0)}
                   </tr>`;
@@ -5192,11 +5434,13 @@
           .limit(50),
         // Same independence again: lookup-stats.sql not having been run must
         // not take the invite list down. 14 days is what the card shows; the
-        // row cap is generous headroom for several testers × 8 outcomes.
+        // row cap is generous headroom for several testers × 11 outcomes.
+        // user_id is selected only to count DISTINCT people per day -- it is
+        // never displayed, and no row here says what was looked up.
         sb.from("lookup_stats")
-          .select("day, outcome, count")
+          .select("user_id, day, outcome, count")
           .order("day", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ]);
 
       if (allowed.error) {
