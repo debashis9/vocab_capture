@@ -6,7 +6,17 @@
   Authentication → Emails → Templates → Magic Link. If you edit one, edit
   the other so they don't drift.
 
-  Supabase variable used: {{ .ConfirmationURL }} (the one-time sign-in link).
+  Supabase variables used: {{ .ConfirmationURL }} (the one-time sign-in link)
+  and {{ .Token }} (the same token as a 6-digit code). They are two
+  representations of ONE token, so using either signs the person in and spends
+  the other. Both are here because of iOS: a Home Screen web app has its own
+  storage, separate from Safari, and a link tapped in Mail always opens Safari
+  rather than the installed app -- so the link can never sign anyone in inside
+  the app, and only the code can. The code is also the way out of a link that
+  went to spam or that a mail scanner opened before the person got to it.
+  NOTE: adding {{ .Token }} is what makes Supabase put a code in this email at
+  all. Removing it from the dashboard copy silently breaks in-app sign-in on
+  every iPhone and iPad.
   Subject line to set in the dashboard alongside this body:
     Your sign-in link for Margin
 
@@ -56,9 +66,18 @@
                 </tr>
               </table>
 
+              <p style="margin:0 0 12px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:15px; line-height:1.6; color:#23201B;">
+                Or type this code into Margin instead — you'll need this one if you're
+                using the app from your iPhone or iPad Home Screen:
+              </p>
+
+              <p style="margin:0 0 24px; font-family:Georgia,'Times New Roman',serif; font-size:30px; font-weight:700; letter-spacing:6px; color:#23201B;">
+                {{ .Token }}
+              </p>
+
               <p style="margin:0 0 16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
                 Didn't request this? You can safely ignore this email — no account changes
-                happen unless the link above is opened.
+                happen unless the link above is opened or the code is used.
               </p>
 
               <p style="margin:0; padding-top:16px; border-top:1px solid #E3DDD0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:13.5px; line-height:1.6; color:#6B6459;">
