@@ -7,7 +7,9 @@
   the other so they don't drift.
 
   Supabase variables used: {{ .ConfirmationURL }} (the one-time sign-in link)
-  and {{ .Token }} (the same token as a 6-digit code). They are two
+  and {{ .Token }} (the same token as a numeric code -- its length is set by
+  Authentication -> Providers -> Email -> Email OTP Length, 6-10, and this
+  project currently issues 8). They are two
   representations of ONE token, so using either signs the person in and spends
   the other. Both are here because of iOS: a Home Screen web app has its own
   storage, separate from Safari, and a link tapped in Mail always opens Safari

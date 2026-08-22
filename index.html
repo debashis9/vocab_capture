@@ -859,9 +859,10 @@
                  border-top: 1px solid var(--line); padding-top: 18px; }
     .code-label { color: var(--ink-soft); font-size: 13px; }
     .code-row { display: flex; gap: 10px; flex-wrap: wrap; }
-    /* Wide enough for six digits and no wider -- a full-width box invites a
-       sentence. The letter-spacing is what makes six digits scannable. */
-    .code-form input { flex: 0 1 9rem; letter-spacing: 0.28em; font-size: 17px; }
+    /* Wide enough for the longest code GoTrue will issue (10) and no wider --
+       a full-width box invites a sentence. The letter-spacing is what makes a
+       run of digits scannable. */
+    .code-form input { flex: 0 1 12rem; letter-spacing: 0.22em; font-size: 17px; }
     .code-form button { flex: 0 1 auto; }
     .code-hint { margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
     .code-hint:empty { display: none; }
@@ -1193,7 +1194,7 @@
           <button id="request-submit" type="submit">Ask for access</button>
         </form>
         <p id="auth-status" class="auth-status" hidden></p>
-        <!-- The same email carries a link AND a 6-digit code; they are two
+        <!-- The same email carries a link AND a numeric code; they are two
              representations of one one-time token, so using either signs you
              in and spends the other.
              This exists because of iOS. A Home Screen web app there has its
@@ -1205,12 +1206,18 @@
              Only shown once a link has actually been sent, so the card a new
              person meets is exactly as simple as it was. -->
         <form id="code-form" class="auth-form code-form" hidden>
-          <label id="code-label" class="code-label" for="auth-code">Or enter the 6-digit code from that email</label>
+          <label id="code-label" class="code-label" for="auth-code">Or enter the code from that email</label>
           <div class="code-row">
             <!-- one-time-code is what makes iOS offer the code from Mail
                  above the keyboard, so this is two taps and no typing. -->
+            <!-- maxlength is GoTrue's ceiling, not this project's setting. The
+                 code's actual length is configured server-side (Authentication
+                 -> Providers -> Email -> Email OTP Length, 6-10) and the
+                 browser has no way to read it, so nothing here may assume a
+                 number -- this shipped assuming 6 and the project turned out
+                 to be sending 8, which silently truncated every code. -->
             <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code"
-              pattern="[0-9]*" maxlength="6" placeholder="123456" aria-describedby="code-hint" />
+              pattern="[0-9]*" maxlength="10" aria-describedby="code-hint" />
             <button type="submit">Sign in</button>
           </div>
           <p id="code-hint" class="code-hint"></p>
@@ -1631,7 +1638,7 @@
       }
     });
 
-    // ---------- the 6-digit code (the other half of the same email) --------
+    // ---------- the code (the other half of the same email) ----------------
     //
     // Why this exists at all, since a link is simpler: on iOS a Home Screen
     // web app has its own storage, separate from Safari, and a link tapped in
@@ -1645,7 +1652,17 @@
     // It earns its place off iOS too -- it's the way out of a link that went
     // to spam, or that a corporate mail scanner opened and spent before the
     // person got to it.
+    // GoTrue's range, not a choice made here. The length actually issued is a
+    // server setting (Authentication -> Providers -> Email -> Email OTP
+    // Length) with no client-readable equivalent, so this code treats the
+    // length as unknown throughout. Found the hard way: it first shipped
+    // assuming 6, the project was set to 8, and every code was silently
+    // truncated to its first six digits and rejected.
+    const OTP_MIN_LENGTH = 6;
+    const OTP_MAX_LENGTH = 10;
+
     let pendingCodeEmail = null;
+    let lastCodeLength = 0;
 
     // The installed-app case, where the link genuinely cannot work. iPadOS
     // reports itself as a Mac, hence the touch-points check; navigator
@@ -1670,12 +1687,13 @@
       // cannot sign you in here -- so it stops being an alternative and
       // becomes the instruction.
       $("code-label").textContent = inApp
-        ? "Enter the 6-digit code from that email"
-        : "Or enter the 6-digit code from that email";
+        ? "Enter the code from that email"
+        : "Or enter the code from that email";
       $("code-hint").textContent = inApp
         ? "Tapping the link opens Safari, which signs you in there rather than here — so in the installed app, use the code."
         : "";
       $("auth-code").value = "";
+      lastCodeLength = 0;
       $("auth-code").focus();
     }
 
@@ -1683,23 +1701,38 @@
       pendingCodeEmail = null;
       $("code-form").hidden = true;
       $("auth-code").value = "";
+      lastCodeLength = 0;
       $("code-hint").textContent = "";
     }
 
-    // Auto-submit on the sixth digit. With autocomplete="one-time-code" iOS
-    // offers the code from Mail above the keyboard, so this makes the whole
-    // thing two taps: the field, then the suggestion.
+    // Submits itself only when the code arrived IN ONE GO -- an autofill tap
+    // or a paste. That's what keeps the iOS flow at two taps (the field, then
+    // the suggestion above the keyboard) without having to know how long the
+    // code is: a jump of more than one character can't have been typed.
+    // Submitting at a fixed length instead is what broke this the first time.
+    // Someone typing it by hand finishes with the button, which is one tap
+    // more and always correct.
     $("auth-code").addEventListener("input", (e) => {
-      const digits = e.target.value.replace(/\D/g, "").slice(0, 6);
+      const digits = e.target.value.replace(/\D/g, "").slice(0, OTP_MAX_LENGTH);
       if (digits !== e.target.value) e.target.value = digits;
-      if (digits.length === 6) $("code-form").requestSubmit();
+      const arrivedAtOnce = digits.length - lastCodeLength > 1;
+      lastCodeLength = digits.length;
+      if (arrivedAtOnce && digits.length >= OTP_MIN_LENGTH) $("code-form").requestSubmit();
     });
 
     $("code-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const token = $("auth-code").value.replace(/\D/g, "");
       const status = $("auth-status");
-      if (token.length !== 6 || !pendingCodeEmail) return;
+      if (!pendingCodeEmail) return;
+      // Says so rather than doing nothing: a button that silently ignores you
+      // is worse than one that tells you what's missing.
+      if (token.length < OTP_MIN_LENGTH) {
+        status.hidden = false;
+        status.className = "auth-status error";
+        status.textContent = "That code looks too short — check the email and enter all of it.";
+        return;
+      }
 
       const btn = e.target.querySelector("button");
       btn.disabled = true;
@@ -1724,6 +1757,7 @@
           ? "That code didn't work — they expire, and each one only works once. Send yourself a fresh link and try the new code."
           : "Couldn't sign you in: " + error.message;
         $("auth-code").value = "";
+        lastCodeLength = 0;
         $("auth-code").focus();
         return;
       }
