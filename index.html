@@ -853,6 +853,18 @@
     .auth-note { margin: 20px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
     .auth-status { margin: 16px 0 0; color: var(--ink-soft); font-size: 14px; }
     .auth-status.error { color: var(--oxblood); }
+    /* The code is an alternative to the link, not a second step, so it is
+       quieter than the form above it and only appears once a mail is sent. */
+    .code-form { flex-direction: column; gap: 8px; margin-top: 18px;
+                 border-top: 1px solid var(--line); padding-top: 18px; }
+    .code-label { color: var(--ink-soft); font-size: 13px; }
+    .code-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    /* Wide enough for six digits and no wider -- a full-width box invites a
+       sentence. The letter-spacing is what makes six digits scannable. */
+    .code-form input { flex: 0 1 9rem; letter-spacing: 0.28em; font-size: 17px; }
+    .code-form button { flex: 0 1 auto; }
+    .code-hint { margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
+    .code-hint:empty { display: none; }
     /* Three stacked fields and a button, rather than the sign-in form's single
        row -- same .auth-form base so the inputs keep their styling. */
     .request-form { flex-direction: column; }
@@ -1181,6 +1193,28 @@
           <button id="request-submit" type="submit">Ask for access</button>
         </form>
         <p id="auth-status" class="auth-status" hidden></p>
+        <!-- The same email carries a link AND a 6-digit code; they are two
+             representations of one one-time token, so using either signs you
+             in and spends the other.
+             This exists because of iOS. A Home Screen web app there has its
+             own storage, separate from Safari, AND a link tapped in Mail
+             always opens Safari rather than the installed app -- so the token
+             lands in the wrong place every time and a link-only sign-in can
+             never complete inside the app. A code has no browser hop, so it
+             works wherever it is typed.
+             Only shown once a link has actually been sent, so the card a new
+             person meets is exactly as simple as it was. -->
+        <form id="code-form" class="auth-form code-form" hidden>
+          <label id="code-label" class="code-label" for="auth-code">Or enter the 6-digit code from that email</label>
+          <div class="code-row">
+            <!-- one-time-code is what makes iOS offer the code from Mail
+                 above the keyboard, so this is two taps and no typing. -->
+            <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+              pattern="[0-9]*" maxlength="6" placeholder="123456" aria-describedby="code-hint" />
+            <button type="submit">Sign in</button>
+          </div>
+          <p id="code-hint" class="code-hint"></p>
+        </form>
         <!-- Always available, not only after a failed sign-in: the automatic
              hand-off below keys off Supabase's error code, and this is the
              path that still works if they ever reword or renumber it. -->
@@ -1401,6 +1435,12 @@
           <dt>The sign-in email never arrived.</dt>
           <dd>Check spam. Margin's mail comes from a personal Gmail account, so it's often
             filtered the first time. Mark it “Not spam” once and the rest arrive.</dd>
+
+          <dt>Why is there a code as well as a link?</dt>
+          <dd>Either signs you in; using one spends the other. The code exists for iPhone and
+            iPad home screen icons, where Apple keeps the app's sign-in separate from Safari's
+            and a tapped link always opens Safari — so only the code can sign you in inside the
+            app. It's also the way past a link that went to spam.</dd>
         </dl>
       </div>
     </section>
@@ -1486,6 +1526,9 @@
       currentSession = null;
       $("app-content").hidden = true;
       $("auth-section").hidden = false;
+      // Starts clean: a code box left over from before Sign out would be
+      // offering a token that has already been spent.
+      hideCodeEntry();
       $("sign-out").hidden = true;
       $("admin-link").hidden = true;
       // Feedback needs a signed-in identity to post under, so it's hidden here.
@@ -1584,7 +1627,111 @@
       } else {
         status.className = "auth-status";
         status.textContent = `Check your inbox — we sent a sign-in link to ${email}.`;
+        showCodeEntry(email);
       }
+    });
+
+    // ---------- the 6-digit code (the other half of the same email) --------
+    //
+    // Why this exists at all, since a link is simpler: on iOS a Home Screen
+    // web app has its own storage, separate from Safari, and a link tapped in
+    // Mail always opens Safari rather than the installed app. Both halves are
+    // required for the trap -- the token lands in Safari's storage, which the
+    // installed app cannot see, so requesting another link from inside the app
+    // just repeats the same loop. A code carries no browser hop, so it lands
+    // wherever it is typed. (Android has neither problem: links in scope open
+    // in the installed app.)
+    //
+    // It earns its place off iOS too -- it's the way out of a link that went
+    // to spam, or that a corporate mail scanner opened and spent before the
+    // person got to it.
+    let pendingCodeEmail = null;
+
+    // The installed-app case, where the link genuinely cannot work. iPadOS
+    // reports itself as a Mac, hence the touch-points check; navigator
+    // .standalone is the iOS-only signal for "launched from the Home Screen".
+    function isIosStandalone() {
+      const ua = navigator.userAgent || "";
+      const iOS = /iPad|iPhone|iPod/.test(ua)
+        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      const standalone = window.navigator.standalone === true
+        || window.matchMedia("(display-mode: standalone)").matches;
+      return iOS && standalone;
+    }
+
+    function showCodeEntry(email) {
+      pendingCodeEmail = email;
+      $("code-form").hidden = false;
+      // Only iOS-in-app gets told the code is the one that works. Saying that
+      // anywhere else would be wrong -- the link is fine in a browser and on
+      // Android -- and would make a simple screen sound complicated.
+      const inApp = isIosStandalone();
+      // "Or" offers a choice. In the installed app there isn't one -- the link
+      // cannot sign you in here -- so it stops being an alternative and
+      // becomes the instruction.
+      $("code-label").textContent = inApp
+        ? "Enter the 6-digit code from that email"
+        : "Or enter the 6-digit code from that email";
+      $("code-hint").textContent = inApp
+        ? "Tapping the link opens Safari, which signs you in there rather than here — so in the installed app, use the code."
+        : "";
+      $("auth-code").value = "";
+      $("auth-code").focus();
+    }
+
+    function hideCodeEntry() {
+      pendingCodeEmail = null;
+      $("code-form").hidden = true;
+      $("auth-code").value = "";
+      $("code-hint").textContent = "";
+    }
+
+    // Auto-submit on the sixth digit. With autocomplete="one-time-code" iOS
+    // offers the code from Mail above the keyboard, so this makes the whole
+    // thing two taps: the field, then the suggestion.
+    $("auth-code").addEventListener("input", (e) => {
+      const digits = e.target.value.replace(/\D/g, "").slice(0, 6);
+      if (digits !== e.target.value) e.target.value = digits;
+      if (digits.length === 6) $("code-form").requestSubmit();
+    });
+
+    $("code-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const token = $("auth-code").value.replace(/\D/g, "");
+      const status = $("auth-status");
+      if (token.length !== 6 || !pendingCodeEmail) return;
+
+      const btn = e.target.querySelector("button");
+      btn.disabled = true;
+      btn.textContent = "Signing in…";
+      status.hidden = false;
+      status.className = "auth-status";
+      status.textContent = "Checking that code…";
+
+      const { data, error } = await sb.auth.verifyOtp({
+        email: pendingCodeEmail,
+        token,
+        type: "email",
+      });
+
+      btn.disabled = false;
+      btn.textContent = "Sign in";
+      if (error) {
+        status.className = "auth-status error";
+        // A spent code and an expired one are the same to the person reading
+        // this, and the remedy is the same: ask for another email.
+        status.textContent = /expired|invalid|token/i.test(error.message || "")
+          ? "That code didn't work — they expire, and each one only works once. Send yourself a fresh link and try the new code."
+          : "Couldn't sign you in: " + error.message;
+        $("auth-code").value = "";
+        $("auth-code").focus();
+        return;
+      }
+      // onAuthStateChange also fires here; calling showSignedIn directly means
+      // the screen doesn't wait on it.
+      hideCodeEntry();
+      status.hidden = true;
+      if (data && data.session) showSignedIn(data.session);
     });
 
     // ---------- asking for access (the other half of the sign-in card) ------
@@ -1610,6 +1757,7 @@
       $("auth-lede").textContent = "Margin is invite-only. Leave your details and you'll get an email once you're added.";
       $("auth-form").hidden = true;
       $("request-form").hidden = false;
+      hideCodeEntry();
       // Both restored explicitly: an expired invite code drops the visitor
       // here from invite mode, which had hidden the note and relabelled the
       // button.
@@ -1631,6 +1779,7 @@
       $("show-request").hidden = false;
       $("show-signin").hidden = true;
       $("auth-status").hidden = true;
+      hideCodeEntry();
     }
 
     // ---------- arriving with an invite code (?i=CODE) ------------------
@@ -1650,6 +1799,7 @@
       $("auth-lede").textContent = "Put your email in and your sign-in link comes straight back — no waiting to be approved.";
       $("auth-form").hidden = true;
       $("request-form").hidden = false;
+      hideCodeEntry();
       // No "how do we know each other?" here: whoever sent the code already
       // knows, and the fewer fields between them and being in, the better.
       $("request-note").hidden = true;
