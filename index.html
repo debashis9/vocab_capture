@@ -4004,6 +4004,185 @@
       renderCropChooser(canvas);
     }
 
+    // ---- straightening a tilted photo ----
+    //
+    // Reported 2026-08-22 from a real phone: on a photo taken at an angle, the
+    // underline marking each recognised word drifts off it, and by the right
+    // of a line it strikes through the middle of the words instead.
+    //
+    // Measured rather than guessed, against the real model. A synthetic page
+    // rendered flat comes back with per-line slopes within 0.5 degrees of
+    // zero and the overlay is near-perfect. The SAME page rotated 6 degrees
+    // comes back with line slopes averaging 9 degrees -- the boxes do follow
+    // the tilt, they just follow it inaccurately -- and the median box grows
+    // from 40 to 50 thousandths of the image height, because the axis-aligned
+    // box around a tilted word is necessarily taller than the word. Both
+    // errors land on the bottom edge, which is exactly where the underline is
+    // drawn.
+    //
+    // So the fix is upstream of the boxes: hand the model a straight page.
+    // Deskewing that same 6-degree page brought the measured slope back to
+    // 0.4 degrees and the median box height down to 34, and the overlay
+    // became indistinguishable from the never-tilted one. Rotating the boxes
+    // afterwards instead was considered and dropped -- it would inherit the
+    // model's own inflated slope estimate, and it cannot undo the box
+    // inflation at all.
+    const DESKEW_MAX_ANGLE = 12;   // degrees either way; bounds the damage of a bad guess
+    const DESKEW_STEP = 0.4;
+    const DESKEW_MIN_ANGLE = 1.0;  // below this, leave the photo alone
+    const DESKEW_WORK_WIDTH = 360; // the estimate runs on a small grey copy
+    // How much sharper the best angle must be than leaving the photo as it is.
+    // Found by testing: a featureless region (blank paper, a badly out-of-focus
+    // crop) scores about the same at every angle, so without this the winner is
+    // decided by floating-point noise and comes back as a confident -12 degrees.
+    // A real tilted page beats its own zero-angle score many times over, so a
+    // margin this small costs nothing and refuses every ambiguous case.
+    const DESKEW_MIN_GAIN = 1.15;
+    // Judge the middle of the region, not its border. Found by testing against
+    // photo-like images: a crop almost always has a hard horizontal edge
+    // somewhere on its boundary -- the edge of the page, the table under it, a
+    // shadow, or just the frame of the photo itself -- and at 0 degrees those
+    // few rows stack into a spike that no amount of real text can beat. With
+    // the border in, a 7-degree page scored the correct angle at 0.78x and was
+    // refused; with it out, the same page scores 8.7x and is corrected to
+    // within 0.2 degrees.
+    const DESKEW_EDGE_INSET = 0.08;
+
+    // Rotates a small greyscale copy through the candidate angles and keeps
+    // the one whose horizontal projection profile has the sharpest peaks:
+    // lines of text only stack into strong dark bands when they are actually
+    // lying flat. Rather than re-rotating the pixels 61 times, each angle
+    // shears the row index as it accumulates (k = y - x*tan(angle)), which is
+    // one pass over a 360px-wide copy per angle -- about 50ms all told.
+    //
+    // Returns degrees, or 0 for "straight enough to leave alone".
+    function estimateSkewDegrees(canvas, sx, sy, sw, sh) {
+      const ix = Math.round(sw * DESKEW_EDGE_INSET);
+      const iy = Math.round(sh * DESKEW_EDGE_INSET);
+      const rw = sw - 2 * ix, rh = sh - 2 * iy;
+      if (rw < 40 || rh < 40) return 0; // too small to say anything about
+
+      const scale = Math.min(1, DESKEW_WORK_WIDTH / rw);
+      const w = Math.max(1, Math.round(rw * scale));
+      const h = Math.max(1, Math.round(rh * scale));
+      if (w < 40 || h < 40) return 0;
+
+      const small = document.createElement("canvas");
+      small.width = w; small.height = h;
+      const sctx = small.getContext("2d");
+      sctx.drawImage(canvas, sx + ix, sy + iy, rw, rh, 0, 0, w, h);
+      let px;
+      try {
+        px = sctx.getImageData(0, 0, w, h).data;
+      } catch (err) {
+        return 0; // can't read the pixels: leave the photo exactly as it is
+      }
+
+      // Darkness per pixel, mean-subtracted so a bright page doesn't swamp
+      // the profile and leave every angle scoring about the same.
+      const dark = new Float32Array(w * h);
+      let sum = 0;
+      for (let i = 0, n = w * h; i < n; i++) {
+        const lum = (px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114) / 255;
+        dark[i] = 1 - lum;
+        sum += dark[i];
+      }
+      const mean = sum / (w * h);
+      for (let i = 0; i < dark.length; i++) dark[i] -= mean;
+
+      const pad = Math.ceil(w * Math.tan((DESKEW_MAX_ANGLE * Math.PI) / 180)) + 2;
+      const rows = h + 2 * pad;
+      const profile = new Float32Array(rows);
+
+      // Sum of squared row-to-row differences in the sheared profile, not
+      // plain variance: it rewards sharp edges between line and gap, which is
+      // what actually separates a straight page from a tilted one.
+      const scoreAt = (deg) => {
+        profile.fill(0);
+        const t = Math.tan((deg * Math.PI) / 180);
+        for (let y = 0; y < h; y++) {
+          const base = y * w;
+          // + 0.5 before the truncation so this ROUNDS. Without it, `| 0`
+          // truncates toward zero, and a shear of -1e-17 pushes every row
+          // index just below its integer and drops the whole profile down a
+          // row -- which made an untilted page score worse at 0 degrees than
+          // at a hair either side of it.
+          for (let x = 0; x < w; x++) profile[(y - x * t + pad + 0.5) | 0] += dark[base + x];
+        }
+        let score = 0;
+        for (let k = 1; k < rows; k++) {
+          const d = profile[k] - profile[k - 1];
+          score += d * d;
+        }
+        return score;
+      };
+
+      const flatScore = scoreAt(0); // what leaving it alone is worth
+      let best = 0, bestScore = -Infinity;
+      // Indexed rather than accumulating `deg += STEP`, so the grid lands on
+      // exact multiples of the step and includes a true 0.
+      const steps = Math.round((2 * DESKEW_MAX_ANGLE) / DESKEW_STEP);
+      for (let i = 0; i <= steps; i++) {
+        const deg = -DESKEW_MAX_ANGLE + i * DESKEW_STEP;
+        const score = scoreAt(deg);
+        if (score > bestScore) { bestScore = score; best = deg; }
+      }
+      // Straighten only when straightening demonstrably sharpens the line
+      // structure. Without this the no-texture case wins on noise -- see
+      // DESKEW_MIN_GAIN. The <= and the positivity check both matter: a
+      // perfectly uniform region scores exactly 0 at every angle, and a
+      // strict > would then hand back whichever angle the loop happened to
+      // visit first (-12).
+      if (!(bestScore > 0) || bestScore <= flatScore * DESKEW_MIN_GAIN) return 0;
+      return Math.abs(best) < DESKEW_MIN_ANGLE ? 0 : best;
+    }
+
+    // Crop, rotate and downscale in ONE drawImage. Doing them as three
+    // separate canvases would resample the photo three times and visibly
+    // soften small print; composing the transform instead costs one
+    // resample, the same as the plain crop this replaces.
+    function drawStraightenedCrop(canvas, sx, sy, sw, sh, degrees, maxDimension) {
+      const rad = (degrees * Math.PI) / 180;
+      const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+      // What the crop measures once it has been rotated.
+      const rw = sw * cos + sh * sin;
+      const rh = sw * sin + sh * cos;
+      const scale = Math.min(1, maxDimension / Math.max(rw, rh));
+
+      const out = document.createElement("canvas");
+      out.width = Math.max(1, Math.round(rw * scale));
+      out.height = Math.max(1, Math.round(rh * scale));
+      const ctx = out.getContext("2d");
+      // Rotating exposes four wedges of nothing at the corners. They get the
+      // page's own colour rather than black, so the model isn't handed hard
+      // dark edges that look like the edge of a page.
+      ctx.fillStyle = sampleAverageColour(canvas, sx, sy, sw, sh);
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.translate(out.width / 2, out.height / 2);
+      ctx.rotate(rad);
+      ctx.scale(scale, scale);
+      ctx.drawImage(canvas, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
+      return out;
+    }
+
+    // The median of an 8x8 thumbnail -- median rather than mean so a dark
+    // photo edge or a line of print can't drag the fill away from the paper.
+    function sampleAverageColour(canvas, sx, sy, sw, sh) {
+      try {
+        const c = document.createElement("canvas");
+        c.width = 8; c.height = 8;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, 8, 8);
+        const d = ctx.getImageData(0, 0, 8, 8).data;
+        const ch = [[], [], []];
+        for (let i = 0; i < 64; i++) for (let k = 0; k < 3; k++) ch[k].push(d[i * 4 + k]);
+        const med = (a) => a.sort((x, y) => x - y)[32];
+        return `rgb(${med(ch[0])}, ${med(ch[1])}, ${med(ch[2])})`;
+      } catch (err) {
+        return "#ffffff";
+      }
+    }
+
     // ---- crop-selection screen: drag over a paragraph, or scan the whole photo ----
     function renderCropChooser(canvas) {
       cropSelection = null;
@@ -4141,19 +4320,20 @@
       const sw = selection ? Math.round((selection.width / 100) * canvas.width) : canvas.width;
       const sh = selection ? Math.round((selection.height / 100) * canvas.height) : canvas.height;
 
-      const scale = Math.min(1, OCR_MAX_DIMENSION / Math.max(sw, sh));
-      const width = Math.round(sw * scale);
-      const height = Math.round(sh * scale);
-
-      const cropped = document.createElement("canvas");
-      cropped.width = width;
-      cropped.height = height;
-      cropped.getContext("2d").drawImage(canvas, sx, sy, sw, sh, 0, 0, width, height);
+      // Straighten a tilted photo before anyone sees it or the model reads it
+      // -- see estimateSkewDegrees() for why this matters so much.
+      const skew = estimateSkewDegrees(canvas, sx, sy, sw, sh);
+      const cropped = drawStraightenedCrop(canvas, sx, sy, sw, sh, -skew, OCR_MAX_DIMENSION);
+      const width = cropped.width;
+      const height = cropped.height;
 
       // The displayed photo and the photo the model actually saw must be
       // pixel-dimension-identical, or the overlay math misaligns -- so the
       // same canvas' data URL is what gets shown later, at this same
-      // width/height, not the source's original resolution.
+      // width/height, not the source's original resolution. This is also why
+      // the straightening happens HERE, before the split: rotating the photo
+      // the words are drawn on keeps the two in step for free, where
+      // rotating each of a hundred word boxes afterwards would not.
       const dataUrl = canvasToImageDataUrl(cropped, 0.8);
       if (!dataUrl) {
         renderCameraError("Couldn't prepare that photo to scan. Try again, or choose a different one.");
