@@ -679,6 +679,9 @@
     .ocr-viewport {
       overflow: hidden; text-align: center; touch-action: none;
       border-radius: var(--radius); background: #000;
+      /* The photo used to butt straight up against the hint line above it,
+         which read as one crowded block on a phone. */
+      margin-top: 16px;
     }
     /* display:inline-block so this wrapper shrink-wraps to the image's own
        rendered size -- the word buttons inside are positioned as a percent
@@ -715,6 +718,11 @@
     /* Stays marked after a tap, so returning to the photo shows which words
        have already been looked up instead of having to tap one again to
        find out. */
+    /* An everyday word keeps its tap target and loses its mark -- see
+       COMMON_WORDS. Pressing it still washes and outlines like any other, and
+       .looked-up below still marks it once tapped, so nothing is hidden, only
+       un-advertised. */
+    .ocr-word-choice.common { box-shadow: none; }
     .ocr-word-choice.looked-up {
       background: rgba(138, 48, 51, 0.13);
       box-shadow: inset 0 -2px 0 rgba(138, 48, 51, 0.9);
@@ -4612,7 +4620,11 @@
         return;
       }
       setOcrProgress(
-        `${ocrWordCount} ${ocrWordCount === 1 ? "word" : "words"} found — tap one to look it up`,
+        ocrMarkedCount
+          ? `${ocrMarkedCount} ${ocrMarkedCount === 1 ? "word" : "words"} ready to tap`
+          // Possible on a line of pure function words. They're all still
+          // tappable, so say that rather than "0 words".
+          : "Only everyday words here — tap any of them anyway",
         true,
       );
     }
@@ -4629,6 +4641,7 @@
     // (avoids layout shift).
     function renderCameraWordOverlayShell(dataUrl, baseWidth, baseHeight) {
       ocrWordCount = 0;
+      ocrMarkedCount = 0;
       $("camera-body").innerHTML = `
         <div class="practice-head">
           <h2 class="saved-title">Tap a word to look it up</h2>
@@ -4651,12 +4664,66 @@
     // How many words have landed on the current photo -- reset per scan,
     // shown live so a long page doesn't look frozen while it streams.
     let ocrWordCount = 0;
+    // Of those, how many were actually underlined. The finished line reports
+    // this one, since it's the number the sentence is about.
+    let ocrMarkedCount = 0;
 
     function setOcrProgress(text, done) {
       const line = $("ocr-progress");
       if (!line) return; // the overlay screen isn't up (paused, closed, or an error)
       $("ocr-progress-text").textContent = text;
       line.classList.toggle("done", !!done);
+    }
+
+    // Words not worth marking. The line drawn here is CLOSED-CLASS vs
+    // open-class, which is a real boundary rather than a taste call:
+    // determiners, pronouns, prepositions, conjunctions, auxiliaries and
+    // common adverbs are a fixed set the language doesn't add to, and nobody
+    // is building a vocabulary out of them. Nouns, verbs and adjectives all
+    // stay marked even when they're common ("goes", "saw", "food"), because
+    // those are the class vocabulary is actually made of, and a list that
+    // starts guessing which of them are "easy" will eventually hide the one
+    // word someone opened the app for.
+    //
+    // They stay TAPPABLE -- only the resting underline goes. Taking the tap
+    // away would also take away the escape hatch when the model misreads a
+    // real word as a common one.
+    //
+    // Text arrives already lowercased and punctuation-stripped (see the
+    // Worker's OCR_PROMPT), so a plain lowercase Set is enough.
+    //
+    // Deliberately NOT here, though each looks like it belongs: back, well,
+    // own, need, still. Every one is also an ordinary noun, verb or adjective
+    // (a well, to own, to need, sitting still), and the rule above is that
+    // open-class words keep their mark. Words that are only ever function
+    // words in practice -- can, will, may, might, just -- do stay, since the
+    // noun readings are vanishingly rare in running prose.
+    const COMMON_WORDS = new Set(`
+      a an the this that these those
+      i me my mine myself we us our ours ourselves
+      you your yours yourself yourselves
+      he him his himself she her hers herself it its itself
+      they them their theirs themselves one ones oneself
+      am is are was were be been being
+      have has had having do does did doing done
+      will would shall should can could may might must ought
+      and or but nor so yet if then than because as while when whenever
+      where wherever whether though although unless until since once
+      of in on at to from by for with without about into onto over under
+      above below up down out off through between among against before
+      after during within along across behind beyond near upon per around
+      not no nor never always often sometimes usually just only also even
+      again ever very too quite rather almost already perhaps maybe
+      indeed however therefore thus here there now soon away
+      some any all both each every few many much more most less least
+      other others another such same several enough neither either
+      what which who whom whose why how
+      yes ok okay
+    `.trim().split(/\s+/));
+
+    // Pure numerals too -- a year or a chapter number isn't a word to learn.
+    function isCommonWord(text) {
+      return COMMON_WORDS.has(text) || /^\d+$/.test(text);
     }
 
     // Built via the DOM API (not an innerHTML string) so there's no need
@@ -4667,6 +4734,9 @@
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "ocr-word-choice";
+      // Still a button, still tappable -- .common only drops the resting
+      // underline, so a page of prose isn't a wall of marks.
+      if (isCommonWord(w.text)) btn.classList.add("common");
       btn.dataset.word = w.text;
       btn.style.left = (xmin / 1000) * 100 + "%";
       btn.style.top = (ymin / 1000) * 100 + "%";
@@ -4677,6 +4747,10 @@
       $("ocr-zoom-wrapper").appendChild(btn);
 
       ocrWordCount += 1;
+      if (!btn.classList.contains("common")) ocrMarkedCount += 1;
+      // The live count is every word recognised, not just the marked ones:
+      // it's a "still working" signal, and a run of ordinary prose shouldn't
+      // make the scan look stalled.
       setOcrProgress(`Reading the page… ${ocrWordCount} ${ocrWordCount === 1 ? "word" : "words"} so far`);
     }
 
