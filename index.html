@@ -19,6 +19,10 @@
        ahead of the first actual request, so the very first search of a
        session isn't paying that cost on top of the real round trip. -->
   <link rel="preconnect" href="https://api.dictionaryapi.dev">
+  <!-- Only contacted when the primary can't answer, so this is dns-prefetch
+       rather than a full preconnect: no point paying for a TLS handshake on
+       every load for a service most lookups never touch. -->
+  <link rel="dns-prefetch" href="https://freedictionaryapi.com">
   <link rel="preconnect" href="https://margin-llm-proxy.debashis9.workers.dev">
   <link rel="preconnect" href="https://tnaifyahobaswxgervcy.supabase.co">
 
@@ -478,6 +482,30 @@
       background: var(--oxblood); color: var(--on-oxblood); border-color: var(--oxblood);
     }
     .source-toggle button.active:hover { background: var(--oxblood-hover); color: var(--on-oxblood); }
+
+    /* "The AI definition is ready" — the AI is fetched in the background on
+       every settled lookup now, and it lands a couple of seconds after the
+       dictionary does. Without a mark, the only way to find out it had arrived
+       was to tap the tab and see. Sized and placed to read as a notification
+       dot rather than punctuation. */
+    .source-toggle button .tab-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--oxblood); margin-left: 6px; vertical-align: 1.5px;
+    }
+    /* On the active (filled oxblood) tab an oxblood dot would be invisible.
+       It shouldn't normally be there — opening the tab clears it — but the
+       state exists for the moment between the two. */
+    .source-toggle button.active .tab-dot { background: var(--on-oxblood); }
+    @media (prefers-reduced-motion: no-preference) {
+      .source-toggle button .tab-dot { animation: dotIn 0.35s ease-out; }
+    }
+    @keyframes dotIn { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    /* Available to screen readers, invisible on screen. */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
     #tab-body { margin-top: 4px; }
 
     /* ---- The line from your book (in-card, per word) ---- */
@@ -1049,6 +1077,25 @@
     .stats-table td.stats-zero { color: var(--ink-soft); opacity: 0.45; }
     .stats-table td.stats-bad { color: var(--oxblood); font-weight: 600; }
 
+    /* ---- the usage card ---- */
+    /* Wider first column than the health table: these rows are named in
+       English ("Saved one meaning of several"), not in one-word buckets. */
+    .stats-note { color: var(--ink-soft); font-size: 12.5px; line-height: 1.55; margin: 12px 0 0; }
+    .usage-table th[scope="row"] {
+      color: var(--ink); font-weight: 500; font-size: 13px;
+      white-space: normal; min-width: 190px;
+    }
+    .usage-note { display: block; color: var(--ink-soft); font-size: 11.5px; font-weight: 400; line-height: 1.4; }
+    .usage-table .usage-group th {
+      text-align: left; padding-top: 16px; color: var(--oxblood);
+      font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+      border-bottom: 1px solid var(--line);
+    }
+    .usage-table tbody:first-of-type .usage-group th { padding-top: 6px; }
+    /* A feature nobody has ever used is the point of the card, so it is
+       dimmed rather than hidden — you still need to see it sitting there. */
+    .usage-table .usage-dead th[scope="row"], .usage-table .usage-dead td { opacity: 0.5; }
+
     /* Spent invite codes, folded away rather than deleted. */
     .admin-details { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
     .admin-details summary {
@@ -1372,7 +1419,9 @@
         <h3>Looking a word up</h3>
         <dl>
           <dt>Where do the definitions come from?</dt>
-          <dd>A free public dictionary built on Wiktionary's data. No key, no account.</dd>
+          <dd>Two free public dictionaries, both built on Wiktionary's data. The second is
+            asked only when the first can't answer — which it often can't, so this is why
+            lookups fail far less than they used to.</dd>
 
           <dt>Why does one word show several meanings?</dt>
           <dd>Most words have several. Margin shows them all, grouped by part of speech, so
@@ -1380,11 +1429,15 @@
 
           <dt>What is the AI tab?</dt>
           <dd>A second opinion, written for whatever book is in your “Reading” field — handy
-            when a word is ambiguous. It only runs when you open the tab.</dd>
+            when a word is ambiguous. It's now fetched in the background a moment after each
+            lookup, so it's ready when you want it: a small dot on the tab means its answer
+            has arrived. That does mean the word and your book title go to Google on every
+            lookup you finish — never on one you start typing and abandon.</dd>
 
           <dt>The word wasn't found — is that a dead end?</dt>
-          <dd>No. The card still appears with the AI tab a tap away, which usually handles
-            names, slang and new words. Offline, you get “Save for later” instead.</dd>
+          <dd>No — and it now means both dictionaries drew a blank. The card still appears
+            with the AI tab beside it, already fetching, which usually handles names, slang
+            and new words. Offline, you get “Save for later” instead.</dd>
 
           <dt>Can I say the word instead of typing it?</dt>
           <dd>Yes — the mic uses your device's own speech recognition.</dd>
@@ -1559,8 +1612,21 @@
       $("feedback-toggle").setAttribute("aria-expanded", "false");
     }
 
+    let appOpenCounted = false;
+
     function showSignedIn(session) {
       currentSession = session;
+      // One per signed-in page load, and the latch is load-bearing:
+      // showSignedIn runs twice on every ordinary load (onAuthStateChange and
+      // the belt-and-braces getSession() both call it), so counting here
+      // unlatched would report exactly double the openings. It's the
+      // denominator for everything else on the usage card -- "8 scans" means
+      // nothing without "across how many openings of the app" -- so being
+      // twice the truth would quietly halve every rate on the card.
+      if (!appOpenCounted) {
+        appOpenCounted = true;
+        recordLookupOutcome("app_open");
+      }
       $("auth-section").hidden = true;
       $("app-content").hidden = false;
       // Sign out lives in the masthead now, outside #app-content, so it has
@@ -2358,38 +2424,95 @@
     // fires on every 500ms typing pause, so one word can produce several
     // lookups; and telemetry that adds a network round trip to the request
     // it's measuring is measuring itself as much as anything else.
+    // Two delays, not one. The original single 30s timer lost whole sessions:
+    // open the app, look a word up, save it, close it — all inside 30 seconds —
+    // and nothing was ever written. That is not a hypothetical, it is what the
+    // table showed on 2026-08-23. Two accounts had saved words with no lookup
+    // recorded at all on the day they saved them, and a save is impossible
+    // without a successful lookup ahead of it. So the first batch of a session
+    // goes early and the rest are batched normally.
     const LOOKUP_STATS_FLUSH_DELAY = 30000;
+    const LOOKUP_STATS_FIRST_FLUSH_DELAY = 4000;
     let lookupCounts = {};
     let lookupFlushTimer = null;
+    let lookupStatsFlushedOnce = false;
 
     function recordLookupOutcome(outcome) {
       lookupCounts[outcome] = (lookupCounts[outcome] || 0) + 1;
       if (lookupFlushTimer) return;
-      lookupFlushTimer = setTimeout(flushLookupCounts, LOOKUP_STATS_FLUSH_DELAY);
+      lookupFlushTimer = setTimeout(
+        flushLookupCounts,
+        lookupStatsFlushedOnce ? LOOKUP_STATS_FLUSH_DELAY : LOOKUP_STATS_FIRST_FLUSH_DELAY
+      );
     }
 
-    async function flushLookupCounts() {
+    // A save is the app's one unambiguous success, so it is counted by which
+    // route produced it -- the dictionary tab, one meaning out of a multi-sense
+    // card, the AI tab, or the offline queue. sentence_added rides along
+    // because "did anyone ever use the line-from-your-book field?" is exactly
+    // the kind of question this card exists to answer. The sentence itself is
+    // never sent, only the fact that there was one.
+    function recordSave(kind, sentence) {
+      recordLookupOutcome(kind);
+      if (sentence) recordLookupOutcome("sentence_added");
+    }
+
+    // beacon:true is for the page-is-dying path, and it is the other half of
+    // the fix above. sb.rpc() is an ordinary fetch, and an ordinary fetch is
+    // cancelled when the browser tears the page down — so flushing on the way
+    // out only *looked* like it worked. keepalive:true obliges the browser to
+    // finish the request even after the page is gone (it is capped at 64KB;
+    // this payload is a few dozen bytes).
+    //
+    // The timer path deliberately keeps using sb.rpc, because the SDK refreshes
+    // an expired access token and a raw fetch would just get a 401. On the way
+    // out there is no time to await a refresh, so the beacon spends the token
+    // it has — occasionally losing a last batch is the acceptable half of that
+    // trade, and it is still strictly better than losing every short session.
+    function flushLookupCounts({ beacon = false } = {}) {
       clearTimeout(lookupFlushTimer);
       lookupFlushTimer = null;
       const batch = lookupCounts;
       if (!currentSession || !Object.keys(batch).length) return;
-      // Cleared before the await, not after: a lookup finishing mid-flight
+      // Cleared before the send, not after: a lookup finishing mid-flight
       // should start the next batch rather than be counted twice or lost.
       lookupCounts = {};
-      try {
-        await sb.rpc("record_lookup_outcomes", { counts: batch });
-      } catch (err) {
-        // Telemetry must never be able to break, or even be noticed by, the
-        // feature it watches. A dropped batch is an acceptable loss; a lookup
-        // failing because its counter couldn't be written is not.
+      lookupStatsFlushedOnce = true;
+
+      if (beacon) {
+        try {
+          fetch(SUPABASE_URL + "/rest/v1/rpc/record_lookup_outcomes", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: "Bearer " + currentSession.access_token,
+            },
+            body: JSON.stringify({ counts: batch }),
+            keepalive: true,
+          }).catch(() => {});
+        } catch (err) {
+          // Never let telemetry throw on the way out of the page.
+        }
+        return;
       }
+
+      // Telemetry must never be able to break, or even be noticed by, the
+      // feature it watches. A dropped batch is an acceptable loss; a lookup
+      // failing because its counter couldn't be written is not.
+      sb.rpc("record_lookup_outcomes", { counts: batch }).catch(() => {});
     }
 
-    // A tab closed or backgrounded before the timer fires would otherwise lose
-    // its batch — on a phone, "backgrounded" is how most sessions end.
+    // Both events, because neither one covers the ways a session actually ends.
+    // visibilitychange→hidden is the phone case (backgrounding is how most
+    // sessions end there, and the page often lives on afterwards). pagehide is
+    // the real teardown — reload, navigation, close, and the swipe-away that
+    // never fires visibilitychange at all. Flushing twice is harmless: the
+    // second call finds an empty batch and returns.
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flushLookupCounts();
+      if (document.visibilityState === "hidden") flushLookupCounts({ beacon: true });
     });
+    window.addEventListener("pagehide", () => flushLookupCounts({ beacon: true }));
 
     // ---------- pronunciation ----------
     const CAN_SYNTHESISE_SPEECH =
@@ -2500,6 +2623,9 @@
     // pronunciation file. Hence the retry: the endpoint answers in ~250ms, so
     // a second round trip is cheap, and one retry takes a ~40% failure rate
     // down to ~16%.
+    const DICTIONARY_ENDPOINT = "https://api.dictionaryapi.dev/api/v2/entries/en/";
+    // Second source, tried whenever the first can't produce a definition.
+    const BACKUP_DICTIONARY_ENDPOINT = "https://freedictionaryapi.com/api/v1/entries/en/";
     const DICTIONARY_RETRY_DELAY = 400;
 
     function dictionaryError(kind, message) {
@@ -2524,12 +2650,12 @@
     let pageUnloading = false;
     window.addEventListener("pagehide", () => { pageUnloading = true; });
 
-    async function fetchDictionaryEntry(word, { retries = 1 } = {}) {
+    // Two dictionaries, tried in order. See fetchDictionaryEntry below for
+    // why there are two; this is just the first one.
+    async function fetchPrimaryDictionary(word, { retries = 1 } = {}) {
       let res;
       try {
-        res = await fetch(
-          "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)
-        );
+        res = await fetch(DICTIONARY_ENDPOINT + encodeURIComponent(word));
       } catch (err) {
         // fetch() only rejects when the request never completed — DNS,
         // TLS, offline, connection reset. A real HTTP status, however bad,
@@ -2545,7 +2671,7 @@
         if (retries > 0 && navigator.onLine) {
           recordLookupOutcome("retried");
           await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
-          return fetchDictionaryEntry(word, { retries: retries - 1 });
+          return fetchPrimaryDictionary(word, { retries: retries - 1 });
         }
         throw dictionaryError("network", err.message || "network request failed");
       }
@@ -2559,7 +2685,7 @@
           // hides the very outage it exists to survive.
           recordLookupOutcome("retried");
           await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
-          return fetchDictionaryEntry(word, { retries: retries - 1 });
+          return fetchPrimaryDictionary(word, { retries: retries - 1 });
         }
         throw dictionaryError("server", "HTTP " + res.status);
       }
@@ -2572,6 +2698,162 @@
         // the connection's — same class as a 5xx.
         throw dictionaryError("server", "unreadable response");
       }
+    }
+
+    // The second dictionary. Different service, different origin, same
+    // underlying Wiktionary data -- so it is a genuine second chance at
+    // reaching a definition, not a second opinion on what the word means.
+    //
+    // Why it exists, measured on 2026-08-23: api.dictionaryapi.dev serves
+    // whatever its CDN has cached perfectly well, but anything that has to
+    // reach its origin frequently 502s -- and, critically, THOSE 502s CARRY NO
+    // CORS HEADER. A cross-origin response without one is blocked by the
+    // browser before the app can see it, so fetch() rejects and a plain server
+    // outage arrives disguised as "check your connection". That is why
+    // server_error sat at zero in the stats while network_error kept climbing,
+    // and why the app kept blaming the reader's wifi for someone else's
+    // broken origin.
+    //
+    // Two shape differences from the primary, both handled here rather than in
+    // the caller: a missing word is 200 with an empty entries array (not a
+    // 404), and there are no pronunciation audio files at all (only IPA text),
+    // which costs nothing now that speechSynthesis backs up every word anyway.
+    async function fetchBackupDictionary(word) {
+      let res;
+      try {
+        res = await fetch(BACKUP_DICTIONARY_ENDPOINT + encodeURIComponent(word));
+      } catch (err) {
+        if (pageUnloading) throw dictionaryError("abandoned", "page went away");
+        throw dictionaryError("network", err.message || "network request failed");
+      }
+      if (!res.ok) throw dictionaryError("server", "HTTP " + res.status);
+      let data;
+      try {
+        data = await res.json();
+      } catch (err) {
+        throw dictionaryError("server", "unreadable response");
+      }
+      const result = pickBestBackup(word, data);
+      return result ? { found: true, result } : { found: false };
+    }
+
+    // Ask the primary, fall through to the backup. The caller sees exactly the
+    // same { found, result } it always did and never learns which source
+    // answered -- that's the point, and it's why nothing downstream (render,
+    // the save paths, the offline queue) needed changing.
+    //
+    // The backup is tried on a 404 as well as on a failure, deliberately. The
+    // two services derive from Wiktionary at different times and don't have
+    // identical coverage, so a miss on one is worth a second ask -- and given
+    // ~40% of the primary's "not founds" are really disguised 502s (above),
+    // treating its 404 as final was never safe anyway.
+    async function fetchDictionaryEntry(word) {
+      let primaryError = null;
+      try {
+        const primary = await fetchPrimaryDictionary(word);
+        if (primary.found) return primary;
+      } catch (err) {
+        // The page is going away; there is no point asking a second service.
+        if (err.kind === "abandoned") throw err;
+        primaryError = err;
+      }
+
+      try {
+        const backup = await fetchBackupDictionary(word);
+        if (backup.found) {
+          // How much the second source is actually earning its place. If this
+          // stays near zero the primary has recovered; if it carries a real
+          // share of lookups, the two should swap over.
+          recordLookupOutcome("backup_ok");
+          return backup;
+        }
+        // The backup answered and simply has no entry for this word. That is a
+        // real answer, and it also proves the connection is fine -- so even
+        // when the primary died of a network error, "no entry found" is the
+        // honest thing to say rather than "check your connection".
+        return { found: false };
+      } catch (err) {
+        if (err.kind === "abandoned") throw err;
+        if (primaryError) {
+          // Both sources are unreachable. Report the primary's failure, since
+          // its kind (server vs network) is what shapes the message and the
+          // "Save for later" offer.
+          recordLookupOutcome("backup_failed");
+          throw primaryError;
+        }
+        // The primary's 404 stands on its own; the backup breaking doesn't
+        // turn a genuine miss into an error.
+        return { found: false };
+      }
+    }
+
+    // Flattens the backup service's response into the same shape pickBest
+    // produces. Returns null when there is nothing usable, which the caller
+    // reads as "no entry".
+    //
+    // Its senses nest one level deep (a sense can carry subsenses), so those
+    // are flattened in alongside their parent rather than dropped -- they are
+    // ordinary meanings, just more specific ones. Capped, because a common
+    // word like "set" would otherwise produce a card nobody can read.
+    const BACKUP_MAX_SENSES = 12;
+
+    function pickBestBackup(word, data) {
+      const entries = (data && Array.isArray(data.entries)) ? data.entries : [];
+      if (!entries.length) return null;
+
+      let phonetic = "";
+      const senses = [];
+
+      for (const entry of entries) {
+        const pos = entry.partOfSpeech || "";
+        if (!phonetic) {
+          const ipa = (entry.pronunciations || [])
+            .filter((p) => !p.type || p.type === "ipa")
+            .map((p) => p.text)
+            .find((t) => t && !t.endsWith("-/"));
+          if (ipa) phonetic = ipa;
+        }
+        const posSynonyms = dedupe(entry.synonyms || []).slice(0, 6);
+        const posAntonyms = dedupe(entry.antonyms || []).slice(0, 6);
+
+        const collect = (sense) => {
+          if (!sense || !sense.definition) return;
+          if (senses.length >= BACKUP_MAX_SENSES) return;
+          senses.push({
+            pos,
+            definition: sense.definition,
+            example: (sense.examples || []).find(Boolean) || "",
+            synonyms: dedupe(sense.synonyms || []).slice(0, 6),
+            antonyms: dedupe(sense.antonyms || []).slice(0, 6),
+            posSynonyms,
+            posAntonyms,
+          });
+          for (const sub of sense.subsenses || []) collect(sub);
+        };
+        for (const sense of entry.senses || []) collect(sense);
+      }
+
+      if (!senses.length) return null;
+
+      const first = senses[0];
+      return {
+        word: data.word || word,
+        phonetic,
+        // No audio files from this source at all. The speak button falls back
+        // to the device voice, which it already does for most words.
+        audio: "",
+        senses,
+        pos: first.pos,
+        definition: first.definition,
+        example: first.example,
+        synonyms: senseSynonyms(first),
+        antonyms: senseAntonyms(first),
+        // Deliberately still "typed": this is where the reader typed a word and
+        // got a dictionary answer. Which of the two services happened to serve
+        // it is an implementation detail, and writing a new value here would
+        // change what every saved row means from today onward.
+        source: "typed",
+      };
     }
 
     // How long an auto-search failure waits before it's allowed to put an
@@ -2596,6 +2878,39 @@
       return $("word").value.trim().toLowerCase() === word;
     }
 
+    // How long after a result lands before the AI definition is fetched in the
+    // background. Two delays, for the same reason auto-search failures have a
+    // grace period: auto-search fires on every 500ms typing pause, so without
+    // one, typing "abridged" slowly would send "abr", "abri" and "abrid" to the
+    // AI on the way. An explicit lookup (Enter, the button, a tapped word on a
+    // scanned page) is a finished thought, so it barely waits.
+    const AI_PREFETCH_DELAY_AUTO = 1200;
+    const AI_PREFETCH_DELAY_EXPLICIT = 150;
+    let aiPrefetchTimer = null;
+
+    // Fetches the AI definition in the background so it is already waiting when
+    // the AI tab is opened -- it takes ~3s, which is a long time to sit looking
+    // at a spinner you asked for. A dot on the tab says when it's ready.
+    //
+    // This is the one place in the app that sends a word anywhere without
+    // someone asking for it, so it is gated hard: the lookup must still be the
+    // current one, the word must still be the one on screen, the AI must not
+    // already be loading or loaded for it, and we must be online. Anything the
+    // reader types and then changes their mind about never leaves the device.
+    // It is disclosed in guide.html's "what leaves your device" list and in the
+    // FAQ, both of which were updated in the same round.
+    function scheduleAIPrefetch(word, seq, { auto = false } = {}) {
+      clearTimeout(aiPrefetchTimer);
+      if (!AI_ENABLED || !currentSession) return;
+      aiPrefetchTimer = setTimeout(() => {
+        if (seq !== lookupSeq) return;                        // a newer lookup won
+        if (!currentResult || currentResult.word.toLowerCase() !== word) return;
+        if (aiResult || aiLoading || aiError) return;          // already have one
+        if (!navigator.onLine) return;
+        fetchAI({ auto: true });
+      }, auto ? AI_PREFETCH_DELAY_AUTO : AI_PREFETCH_DELAY_EXPLICIT);
+    }
+
     async function lookup(word, { auto = false } = {}) {
       word = word.trim().toLowerCase();
       if (!word) return;
@@ -2614,11 +2929,13 @@
 
         if (!outcome.found) {
           if (!(await shouldShowFailure(seq, word, auto))) return;
-          renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Check the spelling, or try the base form of the word.`
-            + (AI_ENABLED ? " You can also try the AI tab above." : ""));
+          renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Neither dictionary has an entry — check the spelling, or try the base form of the word.`
+            + (AI_ENABLED ? " The AI tab may still know it — it shows a dot when its answer is ready." : ""));
+          scheduleAIPrefetch(word, seq, { auto });
           return;
         }
         render(outcome.result);
+        scheduleAIPrefetch(word, seq, { auto });
       } catch (err) {
         // "abandoned" is recorded as nothing at all: the page is being torn
         // down, so the lookup never got an answer either way, and counting it
@@ -2638,18 +2955,28 @@
         // "online" event, so queueing a word while already online would
         // strand it until the next disconnect. Hence queueable only in the
         // genuinely-offline case.
-        const aiHint = AI_ENABLED ? " You can also try the AI tab above." : "";
+        // The AI is already on its way by the time this is read (see the
+        // scheduleAIPrefetch call below), so the hint points at the dot rather
+        // than asking for a tap that would only start the same fetch.
+        const aiHint = AI_ENABLED ? " An AI definition is on its way — the AI tab shows a dot when it's ready." : "";
         let message, queueable = false;
         if (!navigator.onLine) {
           message = "You're offline — lookups need an internet connection. Try again once you're back online.";
           queueable = true;
         } else if (err.kind === "server") {
-          message = "The dictionary service is having trouble right now — this is on their end, not yours. Try again in a moment." + aiHint;
+          message = "Neither dictionary could answer just now — this is on their end, not yours. Try again in a moment." + aiHint;
         } else {
-          message = "Couldn't reach the dictionary. Check your connection and try again." + aiHint;
+          // "either" is doing real work here: this message now means two
+          // independent services on two different origins both failed to
+          // answer, which points at this device's connection far more strongly
+          // than the old single-source version ever did.
+          message = "Couldn't reach either dictionary. Check your connection and try again." + aiHint;
           queueable = true;
         }
         renderNotFound(word, message, { queueable });
+        // Only worth asking the AI when there is any chance of reaching it.
+        // Offline, the Worker is exactly as unreachable as the dictionary was.
+        if (navigator.onLine) scheduleAIPrefetch(word, seq, { auto });
       } finally {
         if (seq === lookupSeq) $("go").disabled = false;
       }
@@ -2774,6 +3101,10 @@
     let aiResult = null;
     let aiLoading = false;
     let aiError = null;
+    // Whether the AI tab has been opened for the word currently on screen.
+    // Drives the "ready" dot: a result nobody has looked at yet is news, the
+    // same result after they've read it and switched back is not.
+    let aiSeen = false;
     let activeTab = "dictionary";
 
     // Called once per fresh lookup with the dictionary result. Resets the AI
@@ -2784,6 +3115,7 @@
       aiResult = null;
       aiLoading = false;
       aiError = null;
+      aiSeen = false;
       activeTab = "dictionary";
       renderCard();
     }
@@ -2802,8 +3134,12 @@
       aiResult = null;
       aiLoading = false;
       aiError = null;
+      aiSeen = false;
       activeTab = "dictionary";
       clearTimeout(autoSearchTimer);
+      // A prefetch already scheduled for the word being cleared has nothing
+      // left to attach to, and would spend a request on it for nothing.
+      clearTimeout(aiPrefetchTimer);
       out.innerHTML = "";
       $("word").value = "";
       updateClearButton();
@@ -2837,7 +3173,7 @@
       const toggle = AI_ENABLED ? `
         <div class="source-toggle" role="tablist">
           <button type="button" class="${activeTab === "dictionary" ? "active" : ""}" data-tab="dictionary">Dictionary</button>
-          <button type="button" class="${activeTab === "ai" ? "active" : ""}" data-tab="ai">AI</button>
+          <button type="button" id="tab-ai" class="${activeTab === "ai" ? "active" : ""}" data-tab="ai">${aiTabLabel()}</button>
         </div>` : "";
 
       out.innerHTML = `
@@ -2905,8 +3241,30 @@
     function updateTabBody() {
       const tabButtons = document.querySelectorAll(".source-toggle button");
       tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === activeTab));
+      refreshAITab();
       const body = document.getElementById("tab-body");
       if (body) body.innerHTML = activeTab === "ai" ? renderAIBody() : renderDictionaryBody(currentResult);
+    }
+
+    // A dot on the AI tab once a background-fetched definition is sitting there
+    // unread. Deliberately only that: not while it's still loading (a dot that
+    // means "wait" is worse than no dot), not on an error (nothing to go and
+    // read), and not once it's been seen.
+    const aiReadyForReading = () => !!aiResult && !aiSeen;
+
+    function aiTabLabel() {
+      return aiReadyForReading()
+        ? `AI<span class="tab-dot" aria-hidden="true"></span><span class="sr-only"> — definition ready</span>`
+        : "AI";
+    }
+
+    // Updates the tab label in place. Used instead of renderCard() so the card
+    // doesn't replay its entrance animation, and instead of updateTabBody() so
+    // a definition arriving in the background can't wipe out a "Saved ✓" the
+    // reader is looking at on the dictionary tab.
+    function refreshAITab() {
+      const btn = document.getElementById("tab-ai");
+      if (btn) btn.innerHTML = aiTabLabel();
     }
 
     // Dictionary tab body. Branches on sense count the same way the
@@ -3012,6 +3370,15 @@
     // nothing is requested from the Worker just from drawing the toggle.
     function switchTab(tab) {
       activeTab = tab;
+      // Counted here rather than in fetchAI, and this is the whole point of
+      // splitting the old single ai_lookup counter in two. Since 2026-08-23 an
+      // AI definition is fetched automatically for every settled lookup, so
+      // counting the fetch would now measure the prefetcher, not the person.
+      // ai_viewed is a deliberate act: someone tapped AI and read one.
+      if (tab === "ai") {
+        recordLookupOutcome("ai_viewed");
+        aiSeen = true;
+      }
       if (tab === "ai" && !aiResult && !aiLoading) {
         fetchAI();
         return;
@@ -3019,11 +3386,13 @@
       updateTabBody();
     }
 
-    async function fetchAI() {
-      recordLookupOutcome("ai_lookup");
+    async function fetchAI({ auto = false } = {}) {
+      if (auto) recordLookupOutcome("ai_auto");
       aiLoading = true;
       aiError = null;
-      updateTabBody();
+      // Same reasoning as the finally block below: a background fetch starting
+      // must not redraw the tab the reader is currently reading.
+      if (activeTab === "ai") updateTabBody();
       try {
         aiResult = await lookupAI(currentResult.word, $("book").value.trim());
       } catch (err) {
@@ -3032,7 +3401,10 @@
           : "You're offline — the AI tab needs an internet connection. Try again once you're back online.";
       } finally {
         aiLoading = false;
-        updateTabBody();
+        // A background fetch must not redraw the tab the reader is actually
+        // looking at -- it would reset a "Saved ✓" button mid-save. It only
+        // lights the dot; the body is built when they switch over.
+        if (activeTab === "ai") updateTabBody(); else refreshAITab();
       }
     }
 
@@ -3045,6 +3417,7 @@
 
       btn.disabled = true;
       btn.textContent = "Saving…";
+      const sentence = contextSentenceValue();
       try {
         await saveEntry({
           word: currentResult.word,
@@ -3053,10 +3426,11 @@
           synonyms: aiResult.synonyms,
           antonyms: aiResult.antonyms,
           example: aiResult.example,
-          contextSentence: contextSentenceValue(),
+          contextSentence: sentence,
           book: $("book").value.trim(),
           source: "ai",
         });
+        recordSave("save_ai", sentence);
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
         clearContextSentence();
@@ -3076,6 +3450,9 @@
 
       btn.disabled = true;
       btn.textContent = "Saving…";
+      // Read before the await: clearContextSentence() empties the field on the
+      // way out, so asking afterwards always answers "no sentence".
+      const sentence = contextSentenceValue();
       try {
         await saveEntry({
           word: currentResult.word,
@@ -3084,10 +3461,11 @@
           synonyms: currentResult.synonyms,
           antonyms: currentResult.antonyms,
           example: currentResult.example,
-          contextSentence: contextSentenceValue(),
+          contextSentence: sentence,
           book: $("book").value.trim(),
           source: currentResult.source || "typed",
         });
+        recordSave("save_dict", sentence);
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
         clearContextSentence();
@@ -3112,6 +3490,7 @@
 
       btn.disabled = true;
       btn.textContent = "Saving…";
+      const sentence = contextSentenceValue();
       try {
         await saveEntry({
           word: currentResult.word,
@@ -3123,10 +3502,11 @@
           synonyms: senseSynonyms(sense),
           antonyms: senseAntonyms(sense),
           example: sense.example,
-          contextSentence: contextSentenceValue(),
+          contextSentence: sentence,
           book: $("book").value.trim(),
           source: currentResult.source || "typed",
         });
+        recordSave("save_meaning", sentence);
         btn.textContent = "Saved ✓";
         btn.classList.add("saved");
         clearContextSentence();
@@ -3148,12 +3528,14 @@
 
       btn.disabled = true;
       btn.textContent = "Saving…";
+      const sentence = contextSentenceValue();
       try {
         await queuePendingCapture({
           word: currentResult.word,
           book: $("book").value.trim(),
-          contextSentence: contextSentenceValue(),
+          contextSentence: sentence,
         });
+        recordSave("save_queued", sentence);
         btn.textContent = "Saved for later ✓";
         btn.classList.add("saved");
         clearContextSentence();
@@ -3332,6 +3714,9 @@
     }
 
     $("faq-toggle").addEventListener("click", () => {
+      // Opening only. toggleFootPanel is also how it closes, and a close is
+      // not a read.
+      if ($("faq-panel").hidden) recordLookupOutcome("faq_open");
       toggleFootPanel("faq-toggle", "faq-panel", "feedback-toggle", "feedback-panel");
     });
 
@@ -3412,6 +3797,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `Couldn't send that (${res.status}).`);
 
+        recordLookupOutcome("feedback_sent");
         $("feedback-text").value = "";
         status.hidden = false;
         status.className = "auth-status";
@@ -3606,6 +3992,10 @@
     }
 
     function startPractice(mode) {
+      // Counted where a session actually begins, not on the Practice button:
+      // opening the screen and reading "you need four saved words for the quiz"
+      // is not using the quiz.
+      recordLookupOutcome(mode === "quiz" ? "practice_quiz" : "practice_flash");
       practiceMode = mode;
       practiceEntries = shuffled(practicePool);
       practiceIndex = 0;
@@ -4790,6 +5180,10 @@
     // button again picks right back up instead of re-scanning from scratch
     // if this word wasn't the one they were after.
     function selectOcrWord(word) {
+      // Distinct from scan_used: that one says a photo was sent to be read,
+      // this says the reading was good enough to tap something in. A gap
+      // between the two is the signal that recognition is disappointing.
+      recordLookupOutcome("ocr_word_tap");
       $("word").value = word;
       pauseCameraSection();
       clearTimeout(autoSearchTimer);
@@ -5071,7 +5465,11 @@
       });
     }
 
+    // isbn is only ever present when the cover was actually read by the
+    // scanner, so it doubles as the "which route was this?" flag -- the manual
+    // form always passes null.
     async function addBookToLibrary({ isbn, title, author }) {
+      recordLookupOutcome(isbn ? "book_scan" : "book_manual");
       try {
         await saveBook({ isbn: isbn || null, title, author: author || null });
         await renderLibraryList();
@@ -5082,6 +5480,7 @@
     }
 
     function selectLibraryBook(title) {
+      recordLookupOutcome("library_pick");
       $("word").focus();
       $("book").value = title;
       $("book").dispatchEvent(new Event("input"));
@@ -5128,6 +5527,7 @@
       e.target.value = "";
       if (!title) return;
       if (title === "__add__") { openLibrarySection(); return; }
+      recordLookupOutcome("library_pick");
       $("book").value = title;
       $("book").dispatchEvent(new Event("input"));
     });
@@ -5233,6 +5633,9 @@
         masterToggle.textContent = "Saving…";
         try {
           await setMastered(masterToggle.dataset.id, nowMastered);
+          // Only the on direction. Counting both would make the number mean
+          // "fiddled with the toggle" rather than "finished with a word".
+          if (nowMastered) recordLookupOutcome("learned_marked");
           renderSavedList(await loadSavedEntries(bookFilter ? { book: bookFilter } : undefined));
         } catch (err) {
           masterToggle.disabled = false;
@@ -5252,6 +5655,7 @@
           } else {
             await deleteEntry(del.dataset.id);
           }
+          recordLookupOutcome("word_deleted");
           expandedIds.delete(del.dataset.id);
           refreshSavedList();
         } catch (err) {
@@ -5509,6 +5913,17 @@
               nudge, not three separate rows. <strong>Ignore</strong> is silent: they're never
               told, and they can ask again later.</p>
 
+            <h3>The two stats cards</h3>
+            <p><em>Lookup health</em> answers "is the dictionary working?"; <em>How Margin is
+              being used</em> answers "which features earn their place?". Both are counts only —
+              no word, sentence, book, photo or name is ever recorded, which is why the privacy
+              list in the guide needs no line about them. Keep it that way if you add a counter.</p>
+            <p>Two numbers are easy to misread. <strong>Retried</strong> and <strong>Backup</strong>
+              are lookups that <em>succeeded</em> — the retry or the second dictionary rescued
+              them — so they overlap "Found" rather than adding to it. And a <strong>zero
+              before 23 Aug</strong> means "not measured yet", not "nobody wanted it": that's
+              when the feature counters started.</p>
+
             <h3>About the emails</h3>
             <p>Margin's emails often land in <strong>spam</strong>, because they come from an
               ordinary Gmail account rather than a company mail server. Say "check your spam"
@@ -5631,16 +6046,23 @@
       // (ai_lookup, voice_input, scan_used) are left out for a different
       // reason -- they aren't dictionary calls, and folding them in would
       // make the success rate below meaningless.
+      // backup_ok is excluded for the same reason retried is: it describes a
+      // lookup already counted under ok, not an extra lookup.
       const total = (b) => n(b,"ok") + n(b,"not_found") + n(b,"server_error") + n(b,"network_error") + n(b,"offline");
 
       const today = byDay.get(days[0]) || { counts: {}, people: new Set() };
       const todayTotal = total(today);
-      const theirFault = n(today,"server_error") + n(today,"retried");
+      // A rescue counts as misbehaviour. Both the retry and the second
+      // dictionary hand the reader a clean result, which is the point of them
+      // -- but it means the primary's trouble is invisible unless the rescues
+      // themselves are what's reported. This card exists to see through that.
+      const rescued = n(today,"retried") + n(today,"backup_ok");
+      const theirFault = n(today,"server_error") + rescued;
       const verdict = !todayTotal
         ? "Nothing looked up yet today."
         : theirFault === 0
-        ? "The dictionary is behaving today."
-        : `The dictionary is misbehaving today — <span class="stats-flag">${theirFault} call${theirFault === 1 ? "" : "s"} hit a 5xx</span> (${n(today,"retried")} rescued by the retry, ${n(today,"server_error")} gave up).`;
+        ? "Both dictionaries are behaving today."
+        : `The first dictionary is misbehaving today — <span class="stats-flag">${theirFault} lookup${theirFault === 1 ? "" : "s"} needed help</span> (${n(today,"retried")} rescued by the retry, ${n(today,"backup_ok")} by the second dictionary, ${n(today,"server_error")} failed outright).`;
 
       // What people actually reached for today, beside the plain dictionary
       // box. Counts of use, never of what was used on -- see the note above
@@ -5673,7 +6095,7 @@
               <thead>
                 <tr>
                   <th>Day</th><th>People</th><th>Lookups</th><th>Found</th><th>Not found</th>
-                  <th>Retried</th><th>5xx</th><th>No network</th>
+                  <th>Retried</th><th>Backup</th><th>5xx</th><th>No network</th>
                   <th>AI tab</th><th>Voice</th><th>Scans</th>
                   <th>Audio ok</th><th>Audio fell back</th>
                 </tr>
@@ -5688,6 +6110,7 @@
                     ${cell(n(b,"ok"))}
                     ${cell(n(b,"not_found"))}
                     ${cell(n(b,"retried"), n(b,"retried") > 0)}
+                    ${cell(n(b,"backup_ok"), n(b,"backup_ok") > 0)}
                     ${cell(n(b,"server_error"), n(b,"server_error") > 0)}
                     ${cell(n(b,"network_error") + n(b,"offline"))}
                     ${cell(n(b,"ai_lookup"))}
@@ -5700,6 +6123,191 @@
               </tbody>
             </table>
           </div>
+        </div>`;
+    }
+
+    // ---------- how the app is being used ----------
+    // A different question from the health card above, and deliberately a
+    // separate card: that one asks "is the dictionary working?", this one asks
+    // "which parts of this app does anyone actually use?" -- so that effort
+    // goes where it's earning something, and a feature nobody has ever touched
+    // is either explained badly or shouldn't exist.
+    //
+    // Aggregate only. It never shows who did what: every number below is a
+    // total across everyone, and the one per-feature headcount is a Set size.
+    // Same rule as the counters themselves -- it records THAT the mic was used,
+    // never what was said to it.
+
+    // The day the feature counters started. Anything before this reads as a
+    // zero whether or not the feature was used, so the card says so rather
+    // than letting an old zero be mistaken for a rejected feature.
+    const USAGE_COUNTERS_FROM = "2026-08-23";
+
+    function isoDay(offsetDays = 0) {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      return d.toISOString().slice(0, 10);
+    }
+
+    // label, counter key, and a plain-English note. Grouped by what the reader
+    // was trying to do, not by where the code lives, so a group with nothing in
+    // it points at a whole job the app isn't helping with.
+    const USAGE_GROUPS = [
+      { title: "Getting a word in", items: [
+        ["Typed or tapped lookups", "__lookups__", "every dictionary lookup, however it started"],
+        ["Voice", "voice_input", "said to the mic and recognised"],
+        ["Page scans", "scan_used", "a photo of a page sent to be read"],
+        ["Words tapped on a scan", "ocr_word_tap", "the payoff of a scan — a gap here means the reading isn't good enough to use"],
+      ]},
+      { title: "Understanding it", items: [
+        ["AI tab opened", "ai_viewed", "someone chose to read the AI's version"],
+        ["AI fetched in the background", "ai_auto", "prefetched on every settled lookup since 23 Aug — cost, not use"],
+        ["Pronunciation played", "__audio__", "the speaker button, either source"],
+      ]},
+      { title: "Keeping it", items: [
+        ["Saved from the dictionary", "save_dict", ""],
+        ["Saved one meaning of several", "save_meaning", "the multi-sense picker"],
+        ["Saved from the AI tab", "save_ai", ""],
+        ["Saved for later (offline)", "save_queued", ""],
+        ["Added the line from their book", "sentence_added", "the optional sentence field inside the card"],
+      ]},
+      { title: "Coming back to it", items: [
+        ["Flashcard sessions", "practice_flash", ""],
+        ["Quiz sessions", "practice_quiz", "needs four saved words to be offered at all"],
+        ["Marked a word learned", "learned_marked", ""],
+        ["Deleted a word", "word_deleted", ""],
+      ]},
+      { title: "Books", items: [
+        ["Picked a book from the library", "library_pick", ""],
+        ["Scanned a book cover", "book_scan", ""],
+        ["Typed a book in by hand", "book_manual", "the fallback when a cover won't read — heavy use here means scanning is failing"],
+      ]},
+      { title: "Around the app", items: [
+        ["Opened the FAQ", "faq_open", ""],
+        ["Sent feedback", "feedback_sent", ""],
+        ["Used the Install button", "install_click", "only ever offered on Android/desktop Chrome"],
+      ]},
+    ];
+
+    function renderUsageCard(rows, loadError) {
+      if (loadError) {
+        return `
+          <div class="admin-card">
+            <h2 class="admin-title">How Margin is being used</h2>
+            <p class="admin-req-status error">Couldn't load it: ${escapeHtml(loadError.message)}</p>
+          </div>`;
+      }
+
+      const from7 = isoDay(-6), from30 = isoDay(-29);
+      // key -> { total, last7, last30, people:Set, lastDay }
+      const stat = new Map();
+      const bump = (key, row) => {
+        if (!stat.has(key)) stat.set(key, { total: 0, last7: 0, last30: 0, people: new Set(), lastDay: "" });
+        const t = stat.get(key);
+        t.total += row.count;
+        if (row.day >= from7) t.last7 += row.count;
+        if (row.day >= from30) t.last30 += row.count;
+        if (row.user_id) t.people.add(row.user_id);
+        if (row.day > t.lastDay) t.lastDay = row.day;
+      };
+
+      for (const row of rows) {
+        bump(row.outcome, row);
+        // Two synthetic keys, so the card can show a job rather than a bucket.
+        // A lookup is a lookup whether it was found or not; a pronunciation
+        // played whether the recording or the device voice said it.
+        if (["ok", "not_found", "server_error", "network_error", "offline"].includes(row.outcome)) bump("__lookups__", row);
+        if (row.outcome === "audio_ok" || row.outcome === "audio_failed") bump("__audio__", row);
+      }
+
+      const get = (key) => stat.get(key) || { total: 0, last7: 0, last30: 0, people: new Set(), lastDay: "" };
+      const anyRows = rows.length > 0;
+
+      if (!anyRows) {
+        return `
+          <div class="admin-card">
+            <h2 class="admin-title">How Margin is being used</h2>
+            <p class="admin-empty">Nothing recorded yet.</p>
+          </div>`;
+      }
+
+      // ---- the headline, in one sentence ----
+      const opens = get("app_open");
+      const lookups = get("__lookups__");
+      const saves = get("save_dict").last30 + get("save_meaning").last30
+        + get("save_ai").last30 + get("save_queued").last30;
+      const peopleAll = new Set();
+      for (const row of rows) if (row.user_id) peopleAll.add(row.user_id);
+
+      const headline = `In the last 30 days, <strong>${peopleAll.size}</strong> ${peopleAll.size === 1 ? "person" : "people"} `
+        + `opened Margin <strong>${opens.last30}</strong> ${opens.last30 === 1 ? "time" : "times"}, `
+        + `looked up <strong>${lookups.last30}</strong> ${lookups.last30 === 1 ? "word" : "words"} `
+        + `and saved <strong>${saves}</strong>.`;
+
+      // ---- the actionable lines ----
+      // Only counters that have existed long enough to mean something. A
+      // feature counter added today with a zero beside it says nothing yet.
+      const measurable = USAGE_GROUPS.flatMap((g) => g.items)
+        .filter(([, key]) => !key.startsWith("__"));
+      const unused = measurable.filter(([, key]) => get(key).total === 0).map(([label]) => label);
+      const ranked = measurable
+        .map(([label, key]) => ({ label, n: get(key).total }))
+        .filter((x) => x.n > 0)
+        .sort((a, b) => b.n - a.n);
+
+      const topLine = ranked.length
+        ? `<p class="stats-sub">Most used: ${ranked.slice(0, 3).map((x) => `${escapeHtml(x.label)} (${x.n})`).join(" · ")}</p>`
+        : "";
+      const unusedLine = unused.length
+        ? `<p class="stats-sub"><span class="stats-flag">Nobody has used:</span> ${unused.map(escapeHtml).join(" · ")}
+             — worth checking whether each is hard to find, or not wanted.</p>`
+        : `<p class="stats-sub">Every feature has been used at least once.</p>`;
+
+      // Pre-23-Aug AI use was counted under one retired key that didn't
+      // distinguish a deliberate tap from anything else. Shown separately so
+      // the ai_viewed number isn't read as "the AI tab is new".
+      const legacyAI = get("ai_lookup").total;
+      const legacyLine = legacyAI
+        ? `<p class="stats-note">Before 23 Aug the AI tab was counted by a single retired counter: <strong>${legacyAI}</strong> ${legacyAI === 1 ? "definition" : "definitions"} generated, deliberate and automatic together.</p>`
+        : "";
+
+      const row = (label, key, note) => {
+        const t = get(key);
+        const dead = t.total === 0;
+        return `<tr class="${dead ? "usage-dead" : ""}">
+          <th scope="row">${escapeHtml(label)}${note ? `<span class="usage-note">${escapeHtml(note)}</span>` : ""}</th>
+          <td>${t.last7}</td>
+          <td>${t.last30}</td>
+          <td>${t.total}</td>
+          <td>${t.people.size || "—"}</td>
+          <td>${t.lastDay ? escapeHtml(t.lastDay) : "never"}</td>
+        </tr>`;
+      };
+
+      return `
+        <div class="admin-card">
+          <h2 class="admin-title">How Margin is being used</h2>
+          <p class="admin-lede">Everyone's use added together — which features earn their place.
+            Counts only: never a word, a sentence, a book or who did what.</p>
+          <p class="stats-verdict">${headline}</p>
+          ${topLine}
+          ${unusedLine}
+          ${legacyLine}
+          <div class="stats-scroll">
+            <table class="stats-table usage-table">
+              <thead>
+                <tr><th>Feature</th><th>7 days</th><th>30 days</th><th>All</th><th>People</th><th>Last used</th></tr>
+              </thead>
+              ${USAGE_GROUPS.map((g) => `
+                <tbody>
+                  <tr class="usage-group"><th colspan="6">${escapeHtml(g.title)}</th></tr>
+                  ${g.items.map(([label, key, note]) => row(label, key, note)).join("")}
+                </tbody>`).join("")}
+            </table>
+          </div>
+          <p class="stats-note">Feature counters started ${escapeHtml(USAGE_COUNTERS_FROM)} — a zero from before then
+            means "not measured", not "not wanted". Lookups and pronunciation have been counted since 11 Aug.
+            "People" is how many separate accounts have ever used that feature.</p>
         </div>`;
     }
 
@@ -5873,14 +6481,19 @@
           .order("created_at", { ascending: false })
           .limit(50),
         // Same independence again: lookup-stats.sql not having been run must
-        // not take the invite list down. 14 days is what the card shows; the
-        // row cap is generous headroom for several testers × 11 outcomes.
-        // user_id is selected only to count DISTINCT people per day -- it is
-        // never displayed, and no row here says what was looked up.
+        // not take the invite list down. Two cards read these rows now (health
+        // over 14 days, usage over 30), and there are ~30 outcome keys rather
+        // than the original 8, so the window is bounded by date and the row cap
+        // raised to match -- a `limit` alone would silently drop the oldest days
+        // once a few more testers arrive, and a truncated total looks exactly
+        // like a feature nobody uses.
+        // user_id is selected only to count DISTINCT people -- it is never
+        // displayed, and no row here says what was looked up.
         sb.from("lookup_stats")
           .select("user_id, day, outcome, count")
+          .gte("day", isoDay(-60))
           .order("day", { ascending: false })
-          .limit(2000),
+          .limit(20000),
       ]);
 
       if (allowed.error) {
@@ -5898,6 +6511,7 @@
         </div>
         ${renderPendingCard(pending, ignored, requests.error)}
         ${renderLookupStatsCard(stats.error ? [] : (stats.data || []), stats.error)}
+        ${renderUsageCard(stats.error ? [] : (stats.data || []), stats.error)}
         ${renderFeedbackCard(feedback.error ? [] : (feedback.data || []), feedback.error)}
         ${renderCodesCard(codes.error ? [] : (codes.data || []))}
         ${renderInviteCard(allowed.data, adminEmail)}
@@ -6196,6 +6810,7 @@
 
     installBtn.addEventListener("click", async () => {
       if (!deferredInstallPrompt) return;
+      recordLookupOutcome("install_click");
       installBtn.hidden = true;
       deferredInstallPrompt.prompt();
       await deferredInstallPrompt.userChoice;
