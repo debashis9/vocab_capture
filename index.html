@@ -2446,7 +2446,7 @@
     // COUNTS ONLY, NEVER THE WORD. Deliberate: this must not become a log of
     // everything typed into the box. It's why guide.html's privacy list needs
     // no new line -- and it's the test any new counter has to pass too. The
-    // three feature counters (ai_lookup, voice_input, scan_used) record that
+    // feature counters (ai_auto, ai_viewed, voice_input, scan_used) record that
     // something was used, never what it was used on.
     //
     // Buffered rather than one call per lookup, for two reasons: auto-search
@@ -6115,8 +6115,8 @@
       const n = (bucket, key) => bucket.counts[key] || 0;
       // Every dictionary request that got an answer or failed trying.
       // 'retried' is left out on purpose: it counts second attempts, so adding
-      // it would count those lookups twice. The three feature counters
-      // (ai_lookup, voice_input, scan_used) are left out for a different
+      // it would count those lookups twice. The feature counters
+      // (ai_auto, ai_viewed, voice_input, scan_used) are left out for a different
       // reason -- they aren't dictionary calls, and folding them in would
       // make the success rate below meaningless.
       // backup_ok is excluded for the same reason retried is: it describes a
@@ -6137,12 +6137,28 @@
         ? "Both dictionaries are behaving today."
         : `The first dictionary is misbehaving today — <span class="stats-flag">${theirFault} lookup${theirFault === 1 ? "" : "s"} needed help</span> (${n(today,"retried")} rescued by the retry, ${n(today,"backup_ok")} by the second dictionary, ${n(today,"server_error")} failed outright).`;
 
+      // backup_failed was recorded from the day the second dictionary shipped
+      // and displayed nowhere at all, so "the backup is failing too" -- the one
+      // thing that would actually demand action -- was invisible. It is a
+      // sentence rather than a column because it is only ever news when it is
+      // non-zero.
+      const backupBad = n(today,"backup_failed");
+      const backupLine = backupBad
+        ? `<p class="stats-sub"><span class="stats-flag">The second dictionary failed ${backupBad} time${backupBad === 1 ? "" : "s"} today</span> — when both are down a lookup has nowhere left to go.</p>`
+        : "";
+
       // What people actually reached for today, beside the plain dictionary
       // box. Counts of use, never of what was used on -- see the note above
       // record_lookup_outcomes' allowlist.
       const peopleToday = today.people.size;
+      // Both halves of the AI split, because they answer different questions and
+      // one without the other is misleading: ai_auto is what the prefetcher
+      // SPENT, ai_viewed is what somebody actually read. This line read
+      // "AI tab ${n(today,'ai_lookup')}" until 2026-08-25 -- a key retired on
+      // 23 Aug when it was split in two, so it had been a permanent zero ever
+      // since while the AI tab was plainly being used.
       const featureLine = `Today: ${peopleToday} ${peopleToday === 1 ? "person" : "people"}`
-        + ` · AI tab ${n(today,"ai_lookup")}`
+        + ` · AI read ${n(today,"ai_viewed")} (${n(today,"ai_auto")} fetched ahead)`
         + ` · voice ${n(today,"voice_input")}`
         + ` · page scans ${n(today,"scan_used")}`;
 
@@ -6162,14 +6178,15 @@
           <p class="admin-lede">How the outbound calls are actually going, across everyone. Counts only — never the words themselves.</p>
           <p class="stats-verdict">${verdict}</p>
           <p class="stats-sub">${audioLine}</p>
+          ${backupLine}
           <p class="stats-sub">${featureLine}</p>
           <div class="stats-scroll">
             <table class="stats-table">
               <thead>
                 <tr>
                   <th>Day</th><th>People</th><th>Lookups</th><th>Found</th><th>Not found</th>
-                  <th>Retried</th><th>Backup</th><th>5xx</th><th>No network</th>
-                  <th>AI tab</th><th>Voice</th><th>Scans</th>
+                  <th>Retried</th><th>Backup</th><th>Backup failed</th><th>5xx</th><th>No network</th>
+                  <th>AI fetched</th><th>AI read</th><th>Voice</th><th>Scans</th>
                   <th>Audio ok</th><th>Audio fell back</th>
                 </tr>
               </thead>
@@ -6184,9 +6201,11 @@
                     ${cell(n(b,"not_found"))}
                     ${cell(n(b,"retried"), n(b,"retried") > 0)}
                     ${cell(n(b,"backup_ok"), n(b,"backup_ok") > 0)}
+                    ${cell(n(b,"backup_failed"), n(b,"backup_failed") > 0)}
                     ${cell(n(b,"server_error"), n(b,"server_error") > 0)}
                     ${cell(n(b,"network_error") + n(b,"offline"))}
-                    ${cell(n(b,"ai_lookup"))}
+                    ${cell(n(b,"ai_auto"))}
+                    ${cell(n(b,"ai_viewed"))}
                     ${cell(n(b,"voice_input"))}
                     ${cell(n(b,"scan_used"))}
                     ${cell(n(b,"audio_ok"))}
