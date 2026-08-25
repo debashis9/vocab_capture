@@ -1085,6 +1085,23 @@
     /* Wider first column than the health table: these rows are named in
        English ("Saved one meaning of several"), not in one-word buckets. */
     .stats-note { color: var(--ink-soft); font-size: 12.5px; line-height: 1.55; margin: 12px 0 0; }
+    /* The two clocks. Wraps rather than scrolls -- it sits above a table that
+       already scrolls, and a second scrolling strip would be confusing. */
+    .stats-fresh {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+      font-size: 12.5px; color: var(--ink-soft);
+      margin: 0 0 14px; padding: 9px 12px;
+      background: var(--paper-2); border: 1px solid var(--line); border-radius: 6px;
+    }
+    .stats-fresh strong { color: var(--ink); font-weight: 600; }
+    .stats-fresh-warn { border-color: var(--oxblood); }
+    .stats-fresh-err { color: var(--oxblood); flex-basis: 100%; }
+    .btn-mini {
+      font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer;
+      background: none; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 999px;
+    }
+    .btn-mini:hover, .btn-mini:focus-visible { border-color: var(--oxblood); color: var(--oxblood); }
     .usage-table th[scope="row"] {
       color: var(--ink); font-weight: 500; font-size: 13px;
       white-space: normal; min-width: 190px;
@@ -2436,26 +2453,53 @@
     // fires on every 500ms typing pause, so one word can produce several
     // lookups; and telemetry that adds a network round trip to the request
     // it's measuring is measuring itself as much as anything else.
-    // Two delays, not one. The original single 30s timer lost whole sessions:
-    // open the app, look a word up, save it, close it — all inside 30 seconds —
-    // and nothing was ever written. That is not a hypothetical, it is what the
-    // table showed on 2026-08-23. Two accounts had saved words with no lookup
-    // recorded at all on the day they saved them, and a save is impossible
-    // without a successful lookup ahead of it. So the first batch of a session
-    // goes early and the rest are batched normally.
-    const LOOKUP_STATS_FLUSH_DELAY = 30000;
-    const LOOKUP_STATS_FIRST_FLUSH_DELAY = 4000;
+    // ONE short delay, not two. The two-tier version (4s for the first batch of a
+    // session, 30s for every batch after it) lost almost everything, and the
+    // shape of the loss is what gave it away on 2026-08-25: the table held 11
+    // app_open rows and ZERO lookup outcomes of any kind over two days.
+    //
+    // app_open is recorded the instant you sign in, so it rode the 4s timer and
+    // landed -- and in landing it set the "flushed once" latch, putting every
+    // outcome after it on the 30s timer. But open the app, search a word, read
+    // the definition, lock the phone: that is fifteen seconds. The batch was
+    // still in memory, and the only thing that could save it was the pagehide
+    // beacon below -- which had only ever been verified in headless Chromium and
+    // evidently does not survive a real backgrounded PWA.
+    //
+    // Five seconds still does the only job the batching was ever for: keeping
+    // the counter off the critical path of the lookup it measures, and folding
+    // the several lookups one word can produce (auto-search fires on every 500ms
+    // typing pause) into a single write. It just no longer outlives the session.
+    const LOOKUP_STATS_FLUSH_DELAY = 5000;
     let lookupCounts = {};
     let lookupFlushTimer = null;
-    let lookupStatsFlushedOnce = false;
+
+    // "This device last sent" -- read back by the admin card. Two clocks are
+    // shown there: this one, and max(updated_at) from the table itself. When
+    // this one is recent and the table's is not, the flush is failing rather
+    // than nothing having happened, which is the diagnosis that needed the SQL
+    // editor on 2026-08-25.
+    const STATS_SENT_KEY = "margin.statsLastSent";
+    const STATS_ERR_KEY = "margin.statsLastError";
+
+    function noteStatsSent(ok, message) {
+      try {
+        if (ok) {
+          localStorage.setItem(STATS_SENT_KEY, String(Date.now()));
+          localStorage.removeItem(STATS_ERR_KEY);
+        } else if (message) {
+          localStorage.setItem(STATS_ERR_KEY, message);
+        }
+      } catch (err) {
+        // Private mode / blocked storage. The clock is a convenience, never a
+        // reason for telemetry to throw.
+      }
+    }
 
     function recordLookupOutcome(outcome) {
       lookupCounts[outcome] = (lookupCounts[outcome] || 0) + 1;
       if (lookupFlushTimer) return;
-      lookupFlushTimer = setTimeout(
-        flushLookupCounts,
-        lookupStatsFlushedOnce ? LOOKUP_STATS_FLUSH_DELAY : LOOKUP_STATS_FIRST_FLUSH_DELAY
-      );
+      lookupFlushTimer = setTimeout(flushLookupCounts, LOOKUP_STATS_FLUSH_DELAY);
     }
 
     // A save is the app's one unambiguous success, so it is counted by which
@@ -2467,6 +2511,10 @@
     function recordSave(kind, sentence) {
       recordLookupOutcome(kind);
       if (sentence) recordLookupOutcome("sentence_added");
+      // A save is the app's one unambiguous end-of-task, and it is the moment
+      // someone is most likely to put the phone down -- so this batch goes now
+      // rather than waiting out the timer.
+      flushLookupCounts();
     }
 
     // beacon:true is for the page-is-dying path, and it is the other half of
@@ -2489,7 +2537,6 @@
       // Cleared before the send, not after: a lookup finishing mid-flight
       // should start the next batch rather than be counted twice or lost.
       lookupCounts = {};
-      lookupStatsFlushedOnce = true;
 
       if (beacon) {
         try {
@@ -2503,6 +2550,10 @@
             body: JSON.stringify({ counts: batch }),
             keepalive: true,
           }).catch(() => {});
+          // Optimistic: there is no time to await a response on the way out of
+          // the page. The table's own clock is the authority; this one only says
+          // when this device last tried.
+          noteStatsSent(true);
         } catch (err) {
           // Never let telemetry throw on the way out of the page.
         }
@@ -2512,7 +2563,9 @@
       // Telemetry must never be able to break, or even be noticed by, the
       // feature it watches. A dropped batch is an acceptable loss; a lookup
       // failing because its counter couldn't be written is not.
-      sb.rpc("record_lookup_outcomes", { counts: batch }).catch(() => {});
+      sb.rpc("record_lookup_outcomes", { counts: batch })
+        .then(({ error }) => noteStatsSent(!error, error && error.message))
+        .catch((err) => noteStatsSent(false, err && err.message));
     }
 
     // Both events, because neither one covers the ways a session actually ends.
@@ -2661,6 +2714,14 @@
     // more than one that catches every last event.
     let pageUnloading = false;
     window.addEventListener("pagehide", () => { pageUnloading = true; });
+    // And released again on the way back in. pagehide does NOT only mean "this
+    // page is dying" -- it also fires whenever the page enters the back/forward
+    // cache, which on a phone is every time the app is backgrounded. Without
+    // this the latch stuck true for the life of the page after the first
+    // backgrounding, and from then on every failed lookup was classed
+    // "abandoned" and recorded as nothing at all. Found 2026-08-25; it is why
+    // failure counts after a background were structurally zero rather than low.
+    window.addEventListener("pageshow", () => { pageUnloading = false; });
 
     // Two dictionaries, tried in order. See fetchDictionaryEntry below for
     // why there are two; this is just the first one.
@@ -6195,11 +6256,89 @@
         ["Typed a book in by hand", "book_manual", "the fallback when a cover won't read — heavy use here means scanning is failing"],
       ]},
       { title: "Around the app", items: [
+        ["App opened", "app_open", "the denominator for everything above — a count here with zeroes above it means people are arriving and not looking anything up"],
         ["Opened the FAQ", "faq_open", ""],
         ["Sent feedback", "feedback_sent", ""],
         ["Used the Install button", "install_click", "only ever offered on Android/desktop Chrome"],
       ]},
     ];
+
+    // Plain relative time, short. Used only by the freshness line below, where
+    // "4 minutes ago" is the whole point and an ISO timestamp would not be.
+    function agoText(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return "never";
+      const mins = Math.floor(ms / 60000);
+      if (mins < 1) return "just now";
+      if (mins === 1) return "1 minute ago";
+      if (mins < 60) return mins + " minutes ago";
+      const hrs = Math.floor(mins / 60);
+      if (hrs === 1) return "1 hour ago";
+      if (hrs < 24) return hrs + " hours ago";
+      const days = Math.floor(hrs / 24);
+      return days === 1 ? "1 day ago" : days + " days ago";
+    }
+
+    // Two clocks, because they fail differently and the difference IS the
+    // diagnosis. "Last write received" is the table's own freshness, from
+    // max(updated_at). "This device last sent" is a localStorage stamp written
+    // by flushLookupCounts.
+    //
+    // Recent device + stale table = the flush is failing (a 401, an RLS
+    // problem, a dropped beacon). Stale both = nobody has done anything. Before
+    // this existed those two looked identical from the admin page, and telling
+    // them apart on 2026-08-25 meant going to the SQL editor.
+    function renderStatsFreshness(rows) {
+      let newest = 0;
+      for (const r of rows) {
+        const t = r.updated_at ? Date.parse(r.updated_at) : NaN;
+        if (Number.isFinite(t) && t > newest) newest = t;
+      }
+      let sentAt = 0, lastErr = "";
+      try {
+        sentAt = Number(localStorage.getItem(STATS_SENT_KEY)) || 0;
+        lastErr = localStorage.getItem(STATS_ERR_KEY) || "";
+      } catch (err) {
+        // Storage blocked; the device clock simply reads "never".
+      }
+      const now = Date.now();
+      // Only flag a gap big enough to mean something. A few minutes is NORMAL
+      // and must not be flagged: this card fetches its rows at roughly the
+      // moment the page's own app_open flush goes out, so a perfectly healthy
+      // device is routinely a little ahead of the snapshot it is being compared
+      // against. Ten minutes is well past that and still well inside "you would
+      // notice today". The stamp is ignored after a day so an old one doesn't
+      // nag forever.
+      const STALE_GAP = 10 * 60000;
+      const suspect = sentAt && (now - sentAt) < 24 * 3600 * 1000
+        && (sentAt - newest) > STALE_GAP;
+
+      return `
+        <div class="stats-fresh${suspect || lastErr ? " stats-fresh-warn" : ""}">
+          <span><strong>Last write received:</strong> ${escapeHtml(newest ? agoText(now - newest) : "never")}</span>
+          <span><strong>This device last sent:</strong> ${escapeHtml(sentAt ? agoText(now - sentAt) : "never")}</span>
+          <button type="button" id="stats-flush-now" class="btn-mini">Send mine now</button>
+          ${lastErr ? `<span class="stats-fresh-err">Last send failed: ${escapeHtml(lastErr)}</span>` : ""}
+          ${suspect && !lastErr ? `<span class="stats-fresh-err">This device sent something the table hasn't got — the flush may be failing.</span>` : ""}
+        </div>`;
+    }
+
+    // Sends whatever this device is holding, then reloads the card so the two
+    // clocks above move. This is the check that a counter change actually works
+    // on a real phone -- the thing that was missing when the 30s-delay bug
+    // shipped, because it had only ever been proved in a headless browser.
+    function wireStatsFlush(adminEmail) {
+      const btn = $("stats-flush-now");
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "Sending…";
+        flushLookupCounts();
+        // Give the write a moment to land before re-reading, or the card
+        // reloads showing the state from before the send.
+        await new Promise((r) => setTimeout(r, 900));
+        renderAdminList(adminEmail);
+      });
+    }
 
     function renderUsageCard(rows, loadError) {
       if (loadError) {
@@ -6259,8 +6398,11 @@
       // ---- the actionable lines ----
       // Only counters that have existed long enough to mean something. A
       // feature counter added today with a zero beside it says nothing yet.
+      // app_open is excluded alongside the derived "__" keys: it is the
+      // denominator, not a feature, so it would always top "Most used" and say
+      // nothing. It still gets its own row in the table.
       const measurable = USAGE_GROUPS.flatMap((g) => g.items)
-        .filter(([, key]) => !key.startsWith("__"));
+        .filter(([, key]) => !key.startsWith("__") && key !== "app_open");
       const unused = measurable.filter(([, key]) => get(key).total === 0).map(([label]) => label);
       const ranked = measurable
         .map(([label, key]) => ({ label, n: get(key).total }))
@@ -6301,6 +6443,7 @@
           <h2 class="admin-title">How Margin is being used</h2>
           <p class="admin-lede">Everyone's use added together — which features earn their place.
             Counts only: never a word, a sentence, a book or who did what.</p>
+          ${renderStatsFreshness(rows)}
           <p class="stats-verdict">${headline}</p>
           ${topLine}
           ${unusedLine}
@@ -6308,7 +6451,7 @@
           <div class="stats-scroll">
             <table class="stats-table usage-table">
               <thead>
-                <tr><th>Feature</th><th>7 days</th><th>30 days</th><th>All</th><th>People</th><th>Last used</th></tr>
+                <tr><th>Feature</th><th>7 days</th><th>30 days</th><th>60 days</th><th>People</th><th>Last used</th></tr>
               </thead>
               ${USAGE_GROUPS.map((g) => `
                 <tbody>
@@ -6502,7 +6645,7 @@
         // user_id is selected only to count DISTINCT people -- it is never
         // displayed, and no row here says what was looked up.
         sb.from("lookup_stats")
-          .select("user_id, day, outcome, count")
+          .select("user_id, day, outcome, count, updated_at")
           .gte("day", isoDay(-60))
           .order("day", { ascending: false })
           .limit(20000),
@@ -6543,6 +6686,7 @@
       wireAdminBack();
       wirePendingCard(adminEmail, pending);
       wireCodesCard(adminEmail);
+      wireStatsFlush(adminEmail);
       // Keeps the masthead count honest after an approve or ignore.
       refreshAdminBadge();
 
