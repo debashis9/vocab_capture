@@ -185,6 +185,10 @@
     }
     .faq dd { margin: 0 0 13px 26px; font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
     .faq dd:last-child { margin-bottom: 0; }
+    /* Only the privacy answer uses a list -- it is the one answer that has to
+       stay complete, so it has to stay scannable. */
+    .faq dd ul { margin: 6px 0 8px; padding: 0 0 0 16px; }
+    .faq dd li { margin: 0 0 4px; }
 
     /* ---- Feedback panel, same shape as the FAQ so the footer opens two
            things that visibly belong together ---- */
@@ -1419,9 +1423,7 @@
         <h3>Looking a word up</h3>
         <dl>
           <dt>Where do the definitions come from?</dt>
-          <dd>Two free public dictionaries, both built on Wiktionary's data. The second is
-            asked only when the first can't answer — which it often can't, so this is why
-            lookups fail far less than they used to.</dd>
+          <dd>Free public dictionaries built on Wiktionary's data.</dd>
 
           <dt>Why does one word show several meanings?</dt>
           <dd>Most words have several. Margin shows them all, grouped by part of speech, so
@@ -1429,15 +1431,11 @@
 
           <dt>What is the AI tab?</dt>
           <dd>A second opinion, written for whatever book is in your “Reading” field — handy
-            when a word is ambiguous. It's now fetched in the background a moment after each
-            lookup, so it's ready when you want it: a small dot on the tab means its answer
-            has arrived. That does mean the word and your book title go to Google on every
-            lookup you finish — never on one you start typing and abandon.</dd>
+            when a word is ambiguous. A small dot on the tab means its answer is ready.</dd>
 
           <dt>The word wasn't found — is that a dead end?</dt>
-          <dd>No — and it now means both dictionaries drew a blank. The card still appears
-            with the AI tab beside it, already fetching, which usually handles names, slang
-            and new words. Offline, you get “Save for later” instead.</dd>
+          <dd>No. The card still appears with the AI tab beside it, which usually handles
+            names, slang and new words. Offline, you get “Save for later” instead.</dd>
 
           <dt>Can I say the word instead of typing it?</dt>
           <dd>Yes — the mic uses your device's own speech recognition.</dd>
@@ -1448,18 +1446,13 @@
         <h3>Reading off the page</h3>
         <dl>
           <dt>What does the scan button do?</dt>
-          <dd>Photograph the page and drag a box around the part you want. A tilted photo is
-            straightened first, then words are drawn onto the photo as they're recognised —
-            underlined ones are worth looking up, everyday words are left unmarked but still
-            tap. Double-tap to zoom.</dd>
-
-          <dt>What happens to the photo?</dt>
-          <dd>Sent to Google's Gemini to be read as text, then discarded. Margin keeps no
-            photos.</dd>
+          <dd>Photograph the page and drag a box around the part you want. Words appear on
+            the photo as they're recognised — underlined ones are worth looking up, everyday
+            words are left unmarked but still tap. Double-tap to zoom.</dd>
 
           <dt>Can I scan a book instead of typing its title?</dt>
-          <dd>Yes — scan the cover for title, author and ISBN. Cover art comes from Open
-            Library. Manual entry is there if the cover won't read.</dd>
+          <dd>Yes — scan the cover for title and author. Manual entry is there if the cover
+            won't read.</dd>
 
           <dt>What is “the line from your book”?</dt>
           <dd>The actual sentence you met the word in, as opposed to the dictionary's own
@@ -1471,10 +1464,8 @@
         <h3>Your words</h3>
         <dl>
           <dt>Where are my saved words kept?</dt>
-          <dd>In your account, so they follow you between devices.</dd>
-
-          <dt>Can anyone else see them?</dt>
-          <dd>No. The database enforces that, not just the app.</dd>
+          <dd>In your account, so they follow you between devices. Nobody else can see
+            them.</dd>
 
           <dt>What does “Learned it” do?</dt>
           <dd>Marks a word as got. It stays in the list, greyed out, and drops out of
@@ -1507,12 +1498,33 @@
             filtered the first time. Mark it “Not spam” once and the rest arrive.</dd>
 
           <dt>Why is there a code as well as a link?</dt>
-          <dd>Either signs you in; using one spends the other. The code exists for iPhone and
-            iPad home screen icons, where Apple keeps the app's sign-in separate from Safari's
-            and a tapped link always opens Safari — so only the code can sign you in inside the
-            app. It's also the way past a link that went to spam.</dd>
+          <dd>Either one signs you in, and using one spends the other. On iPhone and iPad,
+            a home screen icon can't be signed in by a tapped link — only the code works
+            there. It's also the way past a link that landed in spam.</dd>
         </dl>
       </div>
+
+      <!-- One place for the whole disclosure. Individual answers above stay short
+           on purpose, but this list must remain COMPLETE -- shorten the prose
+           around it, never the list. It is mirrored in guide.html; change both. -->
+      <div class="faq-group">
+        <h3>Privacy</h3>
+        <dl>
+          <dt>What leaves my device?</dt>
+          <dd>Only what a lookup needs, and only because you asked:
+            <ul>
+              <li>the word you look up → the dictionaries</li>
+              <li>the word and your book title → Google's AI, so its answer is ready if you
+                want it</li>
+              <li>a page or cover photo → Google's AI, to be read as text and discarded</li>
+              <li>a scanned book's ISBN → Open Library, for the cover picture</li>
+              <li>anything you write in Send feedback → me, with your email so I can
+                reply</li>
+            </ul>
+            Margin keeps no photos, and your saved words stay private to your account.</dd>
+        </dl>
+      </div>
+
     </section>
 
     <!-- Feedback, opened from the footer. Signed-in only: it posts through an
