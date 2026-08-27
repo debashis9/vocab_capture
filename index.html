@@ -370,6 +370,20 @@
     .status { margin: 26px 2px; color: var(--ink-soft); font-size: 15px; }
     .status.error { color: var(--oxblood); }
 
+    /* "Did you mean X?" on a miss, and "Read as X" on the AI tab. The word
+       itself is the button -- a separate "look it up" control beside it would
+       be two things to read where one will do. Underlined rather than boxed:
+       it is a correction being offered, not an action being pushed. */
+    .dym { margin-top: 10px; color: var(--ink-soft); font-size: 15px; }
+    .ai-correction { margin: 0 0 10px; color: var(--ink-soft); font-size: 14px; }
+    .dym-word {
+      font: inherit; font-weight: 600; padding: 0;
+      background: none; border: none; border-radius: 0;
+      color: var(--oxblood); text-decoration: underline;
+      text-underline-offset: 3px; cursor: pointer;
+    }
+    .dym-word:hover { text-decoration-thickness: 2px; }
+
     /* ---- Word specimen card ---- */
     .card {
       margin-top: 26px;
@@ -1484,6 +1498,11 @@
             when a word is ambiguous. It starts working as soon as you look a word up, so
             it's usually ready even when the dictionary is being slow. A small dot on the
             tab means its answer is waiting.</dd>
+
+          <dt>I mistyped a word — will it still work?</dt>
+          <dd>Usually. If the spelling is close, Margin offers the word it thinks you meant;
+            tap it for the full dictionary entry. Saving from the AI tab files the corrected
+            spelling, not the typo.</dd>
 
           <dt>The word wasn't found — is that a dead end?</dt>
           <dd>No. The card still appears with the AI tab beside it, which usually handles
@@ -3172,7 +3191,8 @@
         if (!outcome.found) {
           if (!(await shouldShowFailure(seq, word, auto))) return;
           renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Neither dictionary has an entry — check the spelling, or try the base form of the word.`
-            + (AI_ENABLED ? " The AI tab may still know it — it shows a dot when its answer is ready." : ""));
+            + (AI_ENABLED ? " The AI tab may still know it — it shows a dot when its answer is ready." : ""),
+            { genuineMiss: true });
           return;
         }
         render(outcome.result);
@@ -3233,8 +3253,14 @@
     // of being a dead end. Doesn't auto-fetch AI itself — that stays opt-in,
     // same as a successful lookup, so a miss (or a typo) never silently
     // spends an AI call the user didn't ask for.
-    function renderNotFound(word, message, { queueable = false } = {}) {
-      render({ word, notFound: true, notFoundMessage: message, queueable, source: "typed" });
+    function renderNotFound(word, message, { queueable = false, genuineMiss = false } = {}) {
+      render({ word, notFound: true, notFoundMessage: message, queueable, genuineMiss, source: "typed" });
+      // The AI is prefetched from the moment the lookup starts, so on a slow
+      // or timed-out dictionary it has usually ALREADY answered by the time
+      // this card is built -- in which case fetchAI's own call found no slot to
+      // fill. Filling it here covers that ordering; the two calls are
+      // idempotent, and whichever happens second is the one that lands.
+      renderDidYouMean();
     }
 
     // Flatten the API's nested response into the fields we care about.
@@ -3506,6 +3532,10 @@
       refreshAITab();
       const body = document.getElementById("tab-body");
       if (body) body.innerHTML = activeTab === "ai" ? renderAIBody() : renderDictionaryBody(currentResult);
+      // The rebuild above puts a fresh, empty #dym-slot back on the page, so a
+      // suggestion already earned has to be re-applied or it vanishes on a tab
+      // switch away and back.
+      renderDidYouMean();
     }
 
     // A dot on the AI tab once a background-fetched definition is sitting there
@@ -3541,7 +3571,12 @@
       // notFoundMessage is already escaped where it's built in lookup() —
       // not re-escaped here, since it's assembled HTML (the "AI tab" hint),
       // not raw user input.
-      if (w.notFound) return `<p class="status error">${w.notFoundMessage}</p>` +
+      // #dym-slot starts empty and is filled by renderDidYouMean() if the AI
+      // -- which is already on its way -- comes back with a correction a few
+      // seconds later. A SLOT rather than a re-render, because a background AI
+      // completion must never rebuild this tab wholesale; see fetchAI.
+      if (w.notFound) return `<p class="status error" id="notfound-msg">${w.notFoundMessage}</p>` +
+        `<div id="dym-slot"></div>` +
         (w.queueable ? `<div class="save-row"><button id="save-queue" class="btn-save" type="button">Save for later</button></div>` : "");
 
       const chip = (t, cls="") => `<span class="chip ${cls}">${escapeHtml(t)}</span>`;
@@ -3618,7 +3653,17 @@
       if (!aiResult) return `<p class="status">Tap AI to generate a definition.</p>`;
 
       const s = aiResult;
+      // The card's headword stays as typed -- it has to, the Dictionary tab is
+      // still reporting on that exact string. So the correction is stated here
+      // instead, where the answer it produced actually is. Without this the
+      // card reads "abrigd" over the definition of "abridged", which is the
+      // screenshot that prompted this.
+      const fixed = aiCorrection();
+      const correctionLine = fixed
+        ? `<p class="ai-correction">Read as <button type="button" class="dym-word" data-dym="${escapeHtml(fixed)}">${escapeHtml(fixed)}</button></p>`
+        : "";
       return `
+        ${correctionLine}
         <span class="pos">${escapeHtml(s.pos)}</span><span class="ai-badge">AI-generated</span>
         <p class="def">${escapeHtml(s.definition)}</p>
         ${ s.example ? `<p class="example">“${escapeHtml(s.example)}”</p>` : "" }
@@ -3652,6 +3697,84 @@
       updateTabBody();
     }
 
+    // ---------- "did you mean" ----------
+    //
+    // Not a spellchecker, and deliberately not built as one. The AI already
+    // corrects a misspelling as a side effect of defining it -- measured
+    // 2026-08-27 against the live model: abridgd -> abridged, incandesent ->
+    // incandescent, recieve -> receive, serindipity -> serendipity -- and since
+    // v64 that answer is prefetched on every lookup, so the correction is
+    // already sitting there, paid for, at no extra call. All this does is stop
+    // throwing it away.
+    //
+    // The alternatives were measured and lost: Wiktionary's own did-you-mean
+    // (same data both dictionaries derive from, CORS-clean, free) suggested
+    // "a bridge" for "abridgd" and returned nothing at all for "incandesent",
+    // "quixotick" or "recieve". A shipped word list would be hundreds of KB in
+    // a PWA shell that is meant to be one file.
+    //
+    // THE GUARD IS THE POINT. A model can return any string it likes, and
+    // without a limit "save what the AI called it" would let a hallucination
+    // rename the reader's word. So a correction is only accepted when it is a
+    // near-miss of what was actually typed. Measured against the real
+    // corrections above, which sit at distance 1-2.
+    function editDistance(a, b) {
+      if (a === b) return 0;
+      let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+      for (let i = 1; i <= a.length; i++) {
+        const row = [i];
+        for (let j = 1; j <= b.length; j++) {
+          row[j] = Math.min(
+            prev[j] + 1,
+            row[j - 1] + 1,
+            prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+          );
+        }
+        prev = row;
+      }
+      return prev[b.length];
+    }
+
+    // The corrected spelling, or "" when there is nothing to correct. Returns
+    // "" for a mere case/whitespace difference too -- that is not a correction,
+    // and offering it as one would be noise on every single lookup.
+    function aiCorrection() {
+      if (!aiResult || !currentResult) return "";
+      const typed = (currentResult.word || "").trim().toLowerCase();
+      const said = (aiResult.word || "").trim();
+      if (!typed || !said) return "";
+      if (said.toLowerCase() === typed) return "";
+      // Allowance grows with length, so a long word can carry a second slip
+      // without a short one accepting an unrelated word.
+      const allowed = Math.max(2, Math.floor(typed.length / 4));
+      return editDistance(typed, said.toLowerCase()) <= allowed ? said : "";
+    }
+
+    // Fills #dym-slot on a not-found card once the AI has come back with a
+    // correction. Touches ONLY that element -- never updateTabBody() -- so a
+    // background completion cannot rebuild the dictionary tab under the reader.
+    // Safe on a not-found card by construction: there is no "Saved ✓" state
+    // there to destroy.
+    function renderDidYouMean() {
+      const slot = document.getElementById("dym-slot");
+      if (!slot) return;
+      const fixed = aiCorrection();
+      if (!fixed) { slot.innerHTML = ""; return; }
+      slot.innerHTML = `<p class="dym">Did you mean
+        <button type="button" class="dym-word" data-dym="${escapeHtml(fixed)}">${escapeHtml(fixed)}</button>?</p>`;
+
+      // The standing message tells the reader to check the spelling and to go
+      // and try the AI tab. Both are answered the moment a suggestion appears,
+      // and leaving them makes the card issue three instructions where one
+      // answer will do. Only ever applied to a genuine miss -- a timeout or a
+      // network failure must not be rewritten into "no entry found", which
+      // would be a different and untrue claim.
+      const msg = document.getElementById("notfound-msg");
+      if (msg && currentResult && currentResult.genuineMiss) {
+        msg.textContent = `No entry found for “${currentResult.word}”.`;
+      }
+    }
+
     async function fetchAI({ auto = false } = {}) {
       if (auto) recordLookupOutcome("ai_auto");
       aiLoading = true;
@@ -3671,6 +3794,10 @@
         // looking at -- it would reset a "Saved ✓" button mid-save. It only
         // lights the dot; the body is built when they switch over.
         if (activeTab === "ai") updateTabBody(); else refreshAITab();
+        // Independent of which tab is showing: on a miss the suggestion belongs
+        // on the dictionary tab, which is where the reader was told there was
+        // no entry. No-ops when there is no slot or no correction.
+        renderDidYouMean();
       }
     }
 
@@ -3686,7 +3813,10 @@
       const sentence = contextSentenceValue();
       try {
         await saveEntry({
-          word: currentResult.word,
+          // The corrected spelling when there is one, so a typo doesn't get
+          // filed under itself and then come back in flashcards and the quiz
+          // as a misspelling. Guarded by edit distance in aiCorrection().
+          word: aiCorrection() || currentResult.word,
           meaning: aiResult.definition,
           partOfSpeech: aiResult.pos,
           synonyms: aiResult.synonyms,
@@ -5878,6 +6008,20 @@
       if (audioBtn) playPronunciation(audioBtn);
       const saveSenseBtn = e.target.closest(".btn-save-sense");
       if (saveSenseBtn) saveSense(Number(saveSenseBtn.dataset.senseIndex));
+      // Before the [data-tab] check: the suggestion button carries no data-tab,
+      // but keeping these adjacent makes the ordering obvious if one ever does.
+      const dymBtn = e.target.closest(".dym-word");
+      if (dymBtn) {
+        // A real dictionary lookup of the corrected word, not just a swap of
+        // the AI's text -- that is the whole value of showing it. Explicit, so
+        // it reports immediately rather than waiting out the auto-search grace.
+        const w = dymBtn.dataset.dym;
+        $("word").value = w;
+        updateClearButton();
+        clearTimeout(autoSearchTimer);
+        lookup(w);
+        return;
+      }
       const tabBtn = e.target.closest("[data-tab]");
       if (tabBtn) switchTab(tabBtn.dataset.tab);
       if (e.target.id === "sentence-open") {
