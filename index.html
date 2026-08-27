@@ -269,6 +269,16 @@
       padding: 6px 2px; font: inherit; color: var(--ink);
     }
     .book-row input:focus { outline: none; border-bottom-color: var(--oxblood); }
+    /* The cross overlays the field's right edge rather than sitting beside it
+       as a flex sibling. That is the whole point: a book title long enough to
+       fill a phone-width line would push a sibling button off the row, and the
+       cross has to stay reachable exactly then -- a long wrong title is the
+       one most worth clearing. min-width:0 lets the input shrink instead of
+       forcing the row wider. */
+    .book-field { position: relative; display: flex; flex: 1; min-width: 0; }
+    /* Room for the cross, so a long title stops short of it instead of running
+       underneath. Must exceed the button's width + its right offset. */
+    .book-field input { padding-right: 32px; }
     /* The library quick-pick. Fixed width, never content width -- see the
        note on .book-filter below for why. Without this the select stretched
        to fit the longest book title, pushing past the right edge of a phone
@@ -314,6 +324,12 @@
     }
     .btn-clear:hover { background: var(--paper-2); color: var(--oxblood); }
     .btn-clear[hidden] { display: none; }
+    /* MUST stay below .btn-clear: same specificity (one class each), so source
+       order is the only thing that makes these win. Written above the book row
+       first, where they were silently ignored. The Reading field is a dashed
+       bookplate line rather than a boxed input, so its cross is smaller and
+       sits nearer the edge than the word field's. */
+    .btn-clear-book { width: 26px; height: 26px; right: 2px; }
 
     button {
       font: inherit; font-weight: 600; cursor: pointer;
@@ -366,6 +382,9 @@
     }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+    /* A rebuild of a card that is already on screen (loading shell -> result)
+       must not replay the entrance animation. See cardAnimatedFor. */
+    .card.card--static { animation: none; }
 
     /* The margin rule, third and last place it appears: the icon, the wordmark,
        and here down the left edge of the looked-up word. This used to be a
@@ -1156,7 +1175,9 @@
          has no dropdown and still fits on one line. */
       .book-row-reading { flex-wrap: wrap; }
       .book-row-reading .book-filter { margin-left: auto; }
-      .book-row-reading input { order: 3; flex: 1 1 100%; }
+      /* The wrapper is the flex item now, so the ordering moves with it --
+         targeting the input here would leave .book-field on line one. */
+      .book-row-reading .book-field { order: 3; flex: 1 1 100%; }
       /* Same problem one row down: the word field, the mic, the scan button
          and "Look up" sharing one phone-width line left the field itself
          about five characters wide. The field gets the full line; the three
@@ -1316,15 +1337,27 @@
       <!-- Book this word came from — the first line on the page, like the
            bookplate inside a cover: you set it once when you sit down and it
            holds for every word after.
-           Value is remembered between sessions. book-select is a quick-pick
-           from the library (added order) -- choosing one just fills the text
-           input, so typing a book that isn't in the library still works
-           exactly as before, and its "Add a book…" option is now the only
-           way into the Library screen (the old button beside "Saved words"
-           is gone). -->
+           Value is per-session: it holds while the app is open and starts
+           empty on a fresh open (see the note by the localStorage cleanup).
+           The cross clears it without selecting-all first -- you are not
+           always reading the same book you were an hour ago, and two books on
+           the go at once is the case that silently mis-tags words.
+           book-select is a quick-pick from the library (added order) --
+           choosing one just fills the text input, so typing a book that isn't
+           in the library still works exactly as before, and its "Add a book…"
+           option is now the only way into the Library screen (the old button
+           beside "Saved words" is gone). -->
       <div class="book-row book-row-reading">
         <label for="book">Reading</label>
-        <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+        <div class="book-field">
+          <input id="book" type="text" placeholder="e.g. The Name of the Rose" autocomplete="off" />
+          <button id="clear-book" type="button" class="btn-clear btn-clear-book" aria-label="Clear the book" title="Clear the book" hidden>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
         <select id="book-select" class="book-filter" aria-label="Pick from your library">
           <option value="">Library…</option>
           <option value="__add__">Add a book…</option>
@@ -1448,7 +1481,9 @@
 
           <dt>What is the AI tab?</dt>
           <dd>A second opinion, written for whatever book is in your “Reading” field — handy
-            when a word is ambiguous. A small dot on the tab means its answer is ready.</dd>
+            when a word is ambiguous. It starts working as soon as you look a word up, so
+            it's usually ready even when the dictionary is being slow. A small dot on the
+            tab means its answer is waiting.</dd>
 
           <dt>The word wasn't found — is that a dead end?</dt>
           <dd>No. The card still appears with the AI tab beside it, which usually handles
@@ -1483,6 +1518,13 @@
           <dt>Where are my saved words kept?</dt>
           <dd>In your account, so they follow you between devices. Nobody else can see
             them.</dd>
+
+          <dt>Why is “Reading” empty when I open the app?</dt>
+          <dd>On purpose. It holds while you're using the app, so several words from one
+            book need it typed once — but it starts empty each time you open, because the
+            commonest way to file a word under the wrong book is an old title still sitting
+            there. The <strong>×</strong> clears it any time, which is what you want when
+            you put one book down mid-chapter and pick another up.</dd>
 
           <dt>What does “Learned it” do?</dt>
           <dd>Marks a word as got. It stays in the list, greyed out, and drops out of
@@ -2112,10 +2154,20 @@
     // via onerror when there's no isbn or no cover on file for it.
     const bookCoverUrl = (isbn) => `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-M.jpg`;
 
-    // Remember the current book between sessions (simple key/value, not the word list).
-    const BOOK_KEY = "margin.book";
-    $("book").value = localStorage.getItem(BOOK_KEY) || "";
-    $("book").addEventListener("input", (e) => localStorage.setItem(BOOK_KEY, e.target.value));
+    // "Reading" is PER-SESSION on purpose, since 2026-08-27. It holds while the
+    // app is open -- which is the whole point, several words from one book --
+    // and starts empty on every fresh open.
+    //
+    // It used to be remembered in localStorage with no expiry, so a book from
+    // weeks ago silently tagged today's words. That is worse than no tag at
+    // all: an untagged word is honest and an obviously-missing field, while a
+    // wrongly-tagged one looks correct, is easy to miss, and quietly corrupts
+    // the one thing the saved list exists to give you -- which book a word came
+    // from. Reported by a reader, who noticed the old title still sitting there.
+    //
+    // Nothing is written now, so nothing needs expiring. The old key is cleared
+    // once so an existing install doesn't carry its stale value forever.
+    try { localStorage.removeItem("margin.book"); } catch (e) { /* private mode */ }
 
     // ---------- theme (light / dark / system) ----------
     // "system" means no data-theme attribute — the CSS media query decides.
@@ -2682,16 +2734,70 @@
     // Failures carry err.kind: "server" (they answered, badly) or "network"
     // (we never got an answer at all).
     //
-    // Measured 2026-08-11, and still true on 2026-08-15: their CDN serves
-    // cached entries fine while anything that has to reach their origin comes
-    // back 502/500 about half the time — a not-found lookup, or a
-    // pronunciation file. Hence the retry: the endpoint answers in ~250ms, so
-    // a second round trip is cheap, and one retry takes a ~40% failure rate
-    // down to ~16%.
-    const DICTIONARY_ENDPOINT = "https://api.dictionaryapi.dev/api/v2/entries/en/";
-    // Second source, tried whenever the first can't produce a definition.
-    const BACKUP_DICTIONARY_ENDPOINT = "https://freedictionaryapi.com/api/v1/entries/en/";
+    // ORDER SWAPPED 2026-08-27, and the reason is worth not re-deriving.
+    //
+    // api.dictionaryapi.dev used to be first. It is now second, because it
+    // BYPASSES ITS OWN CDN CACHE FOR ANY REQUEST CARRYING AN "Origin" HEADER --
+    // which is every request a browser makes. Isolated header by header on the
+    // live service:
+    //
+    //     bare curl                     200 in 0.24s   cf-cache-status: HIT
+    //     + Origin: <anything>          522 in 19.90s
+    //     + Referer / Chrome UA /
+    //       Sec-Fetch-Mode, no Origin   200 in 0.23s
+    //
+    // The Origin header alone flips it. So the 2026-08-23 note in CLAUDE.md --
+    // "their CDN caches fine, only origin-bound words fail" -- was measured
+    // with bare curl and was therefore never true of this app: EVERY lookup
+    // Margin has ever sent went to their origin. That origin has since gone
+    // from failing fast (502 in ~250ms) to failing slow (522 after ~19.5s,
+    // Cloudflare sitting on its full connect timeout), which is what turned a
+    // survivable annoyance into a 40-second wait per word.
+    //
+    // THE LESSON, because it has now cost two diagnoses: probe a third-party
+    // API WITH an Origin header, or you are not testing what the browser does.
+    //
+    // freedictionaryapi.com is first now: same underlying Wiktionary data,
+    // correct per-origin CORS echoed back, 0.45-1.3s, and no cache pathology.
+    // Named by SERVICE, not by rank. Each has its own response shape and its
+    // own parser, so a role-named constant ("primary") is a trap the moment
+    // the order changes -- swapping two URLs would silently pair each endpoint
+    // with the other one's parser. fetchDictionaryEntry() below is the single
+    // place the running order is decided.
+    const FREEDICT_ENDPOINT = "https://freedictionaryapi.com/api/v1/entries/en/";
+    const DICTAPIDEV_ENDPOINT = "https://api.dictionaryapi.dev/api/v2/entries/en/";
     const DICTIONARY_RETRY_DELAY = 400;
+
+    // Nothing in the dictionary path had a timeout before 2026-08-27, which is
+    // the app-side half of that outage: a hung service could hold the card on
+    // "Looking up…" for the life of the page, because a fetch that never
+    // settles has no other way to end. These bound the whole chain to roughly
+    // nine seconds worst case (5s + 4s), and every branch below either resolves
+    // or throws within it.
+    const DICTIONARY_TIMEOUT = 5000;
+    const DICTIONARY_BACKUP_TIMEOUT = 4000;
+
+    // fetch() with a deadline. The abort is reported as kind "timeout" rather
+    // than "network" because the two want different handling: a timeout must
+    // NOT be retried (see below), and it means something different to the
+    // reader -- the service is up and too slow, not unreachable.
+    //
+    // A manual AbortController rather than AbortSignal.timeout(): the flag is
+    // what tells our own abort apart from any other AbortError, and it avoids
+    // depending on a newer API than the rest of this file needs.
+    async function fetchWithTimeout(url, ms) {
+      const controller = new AbortController();
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; controller.abort(); }, ms);
+      try {
+        return await fetch(url, { signal: controller.signal });
+      } catch (err) {
+        if (timedOut) throw dictionaryError("timeout", "no answer in " + ms + "ms");
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
 
     function dictionaryError(kind, message) {
       const err = new Error(message);
@@ -2723,13 +2829,19 @@
     // failure counts after a background were structurally zero rather than low.
     window.addEventListener("pageshow", () => { pageUnloading = false; });
 
-    // Two dictionaries, tried in order. See fetchDictionaryEntry below for
-    // why there are two; this is just the first one.
-    async function fetchPrimaryDictionary(word, { retries = 1 } = {}) {
+    // api.dictionaryapi.dev. Second in the running order since 2026-08-27 --
+    // see the endpoint constants above for why. Its 404 is a real "no such
+    // word"; its 5xx and its 522 are not, and the 522 in particular carries no
+    // CORS header, so it reaches us as a rejected fetch rather than a status.
+    async function fetchDictApiDev(word, { retries = 1 } = {}) {
       let res;
       try {
-        res = await fetch(DICTIONARY_ENDPOINT + encodeURIComponent(word));
+        res = await fetchWithTimeout(DICTAPIDEV_ENDPOINT + encodeURIComponent(word), DICTIONARY_BACKUP_TIMEOUT);
       } catch (err) {
+        // A deadline we set ourselves. Never retried: the point of the
+        // timeout is to bound the wait, and spending it twice on the same
+        // sick origin is exactly what turned a 19.5s failure into a 40s one.
+        if (err.kind === "timeout") throw err;
         // fetch() only rejects when the request never completed — DNS,
         // TLS, offline, connection reset. A real HTTP status, however bad,
         // resolves and is handled below.
@@ -2744,7 +2856,7 @@
         if (retries > 0 && navigator.onLine) {
           recordLookupOutcome("retried");
           await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
-          return fetchPrimaryDictionary(word, { retries: retries - 1 });
+          return fetchDictApiDev(word, { retries: retries - 1 });
         }
         throw dictionaryError("network", err.message || "network request failed");
       }
@@ -2758,7 +2870,7 @@
           // hides the very outage it exists to survive.
           recordLookupOutcome("retried");
           await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
-          return fetchPrimaryDictionary(word, { retries: retries - 1 });
+          return fetchDictApiDev(word, { retries: retries - 1 });
         }
         throw dictionaryError("server", "HTTP " + res.status);
       }
@@ -2791,12 +2903,20 @@
     // the caller: a missing word is 200 with an empty entries array (not a
     // 404), and there are no pronunciation audio files at all (only IPA text),
     // which costs nothing now that speechSynthesis backs up every word anyway.
-    async function fetchBackupDictionary(word) {
+    async function fetchFreeDictionary(word, { retries = 1 } = {}) {
       let res;
       try {
-        res = await fetch(BACKUP_DICTIONARY_ENDPOINT + encodeURIComponent(word));
+        res = await fetchWithTimeout(FREEDICT_ENDPOINT + encodeURIComponent(word), DICTIONARY_TIMEOUT);
       } catch (err) {
+        // Same rule as the other service: a timeout is a spent budget, not a
+        // transient blip, so it is never retried. A fast rejection is, once.
+        if (err.kind === "timeout") throw err;
         if (pageUnloading) throw dictionaryError("abandoned", "page went away");
+        if (retries > 0 && navigator.onLine) {
+          recordLookupOutcome("retried");
+          await new Promise((r) => setTimeout(r, DICTIONARY_RETRY_DELAY));
+          return fetchFreeDictionary(word, { retries: retries - 1 });
+        }
         throw dictionaryError("network", err.message || "network request failed");
       }
       if (!res.ok) throw dictionaryError("server", "HTTP " + res.status);
@@ -2810,20 +2930,27 @@
       return result ? { found: true, result } : { found: false };
     }
 
-    // Ask the primary, fall through to the backup. The caller sees exactly the
-    // same { found, result } it always did and never learns which source
+    // Ask the first source, fall through to the second. The caller sees exactly
+    // the same { found, result } it always did and never learns which one
     // answered -- that's the point, and it's why nothing downstream (render,
-    // the save paths, the offline queue) needed changing.
+    // the save paths, the offline queue) needed changing when the order was
+    // swapped on 2026-08-27.
     //
-    // The backup is tried on a 404 as well as on a failure, deliberately. The
+    // THIS FUNCTION IS THE ONLY PLACE THE RUNNING ORDER LIVES. To swap them
+    // again, swap the two calls here; do not touch the endpoint constants.
+    //
+    // The second is tried on a 404 as well as on a failure, deliberately. The
     // two services derive from Wiktionary at different times and don't have
-    // identical coverage, so a miss on one is worth a second ask -- and given
-    // ~40% of the primary's "not founds" are really disguised 502s (above),
-    // treating its 404 as final was never safe anyway.
+    // identical coverage, so a miss on one is worth a second ask.
+    //
+    // NOTE ON THE COUNTERS: backup_ok/backup_failed are ROLE-based -- "the
+    // fallback rescued us" / "both failed". They stay honest across the swap,
+    // but rows before 2026-08-27 mean "freedictionaryapi rescued us" and rows
+    // after mean "dictionaryapi.dev did". Read the date before reading a trend.
     async function fetchDictionaryEntry(word) {
       let primaryError = null;
       try {
-        const primary = await fetchPrimaryDictionary(word);
+        const primary = await fetchFreeDictionary(word);
         if (primary.found) return primary;
       } catch (err) {
         // The page is going away; there is no point asking a second service.
@@ -2832,7 +2959,7 @@
       }
 
       try {
-        const backup = await fetchBackupDictionary(word);
+        const backup = await fetchDictApiDev(word);
         if (backup.found) {
           // How much the second source is actually earning its place. If this
           // stays near zero the primary has recovered; if it carries a real
@@ -2984,13 +3111,55 @@
       }, auto ? AI_PREFETCH_DELAY_AUTO : AI_PREFETCH_DELAY_EXPLICIT);
     }
 
+    // How long a lookup may run before the status line stops saying the same
+    // calm thing. "Looking up…" and "the app has hung" looked identical for as
+    // long as the wait lasted, which during the 2026-08-27 outage was 40
+    // seconds -- long enough that the honest reading was "it's broken".
+    const SLOW_LOOKUP_NOTICE = 2500;
+    let slowLookupTimer = null;
+
     async function lookup(word, { auto = false } = {}) {
       word = word.trim().toLowerCase();
       if (!word) return;
       const seq = ++lookupSeq;
 
-      out.innerHTML = `<p class="status">Looking up “${escapeHtml(word)}”…</p>`;
+      // The card shell goes up IMMEDIATELY, before the dictionary is asked,
+      // carrying the headword and the Dictionary/AI toggle with a loading
+      // state inside the dictionary tab.
+      //
+      // It used to be a bare status line, with the card -- and therefore the
+      // only route to the AI tab -- built only once the dictionary settled. So
+      // for the whole of a slow lookup there was nothing to tap, and the one
+      // source that could still have answered was unreachable precisely when
+      // the other one was failing. That is the "can't even go to the AI tab"
+      // half of the 2026-08-27 report, and it was structural, not incidental.
+      currentResult = { word, loading: true };
+      aiResult = null;
+      aiLoading = false;
+      aiError = null;
+      aiSeen = false;
+      activeTab = "dictionary";
+      renderCard();
       $("go").disabled = true;
+
+      // Escalates the wording in place if this lookup is still running. Guarded
+      // on seq, and on the element still existing -- switching to the AI tab
+      // takes #lookup-status off the page entirely.
+      clearTimeout(slowLookupTimer);
+      slowLookupTimer = setTimeout(() => {
+        if (seq !== lookupSeq) return;
+        const el = document.getElementById("lookup-status");
+        if (el) el.textContent = "Still looking — the dictionary is slow just now.";
+      }, SLOW_LOOKUP_NOTICE);
+
+      // Started here rather than after the dictionary settles, which is where
+      // it used to be. On a slow or failing lookup the AI answer is now
+      // usually already waiting by the time the dictionary gives up, which
+      // turns the worst case from a dead end into a working definition. The
+      // gates inside scheduleAIPrefetch are unchanged, so a half-typed word
+      // still never leaves the device: a newer keystroke bumps lookupSeq and
+      // the scheduled fetch drops itself.
+      scheduleAIPrefetch(word, seq, { auto });
 
       try {
         const outcome = await fetchDictionaryEntry(word);
@@ -3004,11 +3173,9 @@
           if (!(await shouldShowFailure(seq, word, auto))) return;
           renderNotFound(word, `No entry found for “${escapeHtml(word)}”. Neither dictionary has an entry — check the spelling, or try the base form of the word.`
             + (AI_ENABLED ? " The AI tab may still know it — it shows a dot when its answer is ready." : ""));
-          scheduleAIPrefetch(word, seq, { auto });
           return;
         }
         render(outcome.result);
-        scheduleAIPrefetch(word, seq, { auto });
       } catch (err) {
         // "abandoned" is recorded as nothing at all: the page is being torn
         // down, so the lookup never got an answer either way, and counting it
@@ -3016,6 +3183,7 @@
         if (err.kind !== "abandoned") {
           recordLookupOutcome(
             !navigator.onLine ? "offline"
+            : err.kind === "timeout" ? "dict_timeout"
             : err.kind === "server" ? "server_error"
             : "network_error"
           );
@@ -3028,14 +3196,19 @@
         // "online" event, so queueing a word while already online would
         // strand it until the next disconnect. Hence queueable only in the
         // genuinely-offline case.
-        // The AI is already on its way by the time this is read (see the
-        // scheduleAIPrefetch call below), so the hint points at the dot rather
-        // than asking for a tap that would only start the same fetch.
+        // The AI has been on its way since the lookup started (see the
+        // scheduleAIPrefetch call at the top), so the hint points at the dot
+        // rather than asking for a tap that would only start the same fetch.
         const aiHint = AI_ENABLED ? " An AI definition is on its way — the AI tab shows a dot when it's ready." : "";
         let message, queueable = false;
         if (!navigator.onLine) {
           message = "You're offline — lookups need an internet connection. Try again once you're back online.";
           queueable = true;
+        } else if (err.kind === "timeout") {
+          // Deliberately not queueable: "Save for later" is drained by the
+          // "online" event, and we are online -- queueing here would strand
+          // the word until the next disconnect.
+          message = "The dictionaries are taking too long to answer — that's on their end, not yours. Try again in a moment." + aiHint;
         } else if (err.kind === "server") {
           message = "Neither dictionary could answer just now — this is on their end, not yours. Try again in a moment." + aiHint;
         } else {
@@ -3047,11 +3220,11 @@
           queueable = true;
         }
         renderNotFound(word, message, { queueable });
-        // Only worth asking the AI when there is any chance of reaching it.
-        // Offline, the Worker is exactly as unreachable as the dictionary was.
-        if (navigator.onLine) scheduleAIPrefetch(word, seq, { auto });
       } finally {
-        if (seq === lookupSeq) $("go").disabled = false;
+        if (seq === lookupSeq) {
+          clearTimeout(slowLookupTimer);
+          $("go").disabled = false;
+        }
       }
     }
 
@@ -3183,13 +3356,23 @@
     // Called once per fresh lookup with the dictionary result. Resets the AI
     // tab state (a new word means a new, not-yet-fetched AI definition) and
     // draws the card starting on the dictionary tab.
+    // The word whose card has already played its entrance animation. The card
+    // now goes up as a loading shell and is rebuilt in place when the result
+    // lands, so without this the "rise" animation replayed on every settle --
+    // reading as a flicker on a card that never actually went away.
+    let cardAnimatedFor = null;
+
+    // Swaps the settled result into the card that lookup() already put up.
+    //
+    // It used to reset the AI state and force activeTab back to "dictionary".
+    // Both moved to the top of lookup() on 2026-08-27 and MUST NOT come back
+    // here, for two separate reasons: the AI prefetch now starts when the
+    // lookup starts, so resetting here would throw away a fetch that is
+    // already in flight (or already answered); and someone who switched to the
+    // AI tab while waiting would be yanked back to Dictionary the moment the
+    // slow lookup landed -- with the tab they were reading replaced under them.
     function render(w) {
       currentResult = w;
-      aiResult = null;
-      aiLoading = false;
-      aiError = null;
-      aiSeen = false;
-      activeTab = "dictionary";
       renderCard();
     }
 
@@ -3209,6 +3392,10 @@
       aiError = null;
       aiSeen = false;
       activeTab = "dictionary";
+      // The card is going away, so the next one to appear is genuinely new and
+      // should play its entrance animation again.
+      cardAnimatedFor = null;
+      clearTimeout(slowLookupTimer);
       clearTimeout(autoSearchTimer);
       // A prefetch already scheduled for the word being cleared has nothing
       // left to attach to, and would spend a request on it for nothing.
@@ -3225,13 +3412,15 @@
     // which would wrongly reset the AI cache.
     function renderCard() {
       const w = currentResult;
+      const fresh = cardAnimatedFor !== w.word;
+      cardAnimatedFor = w.word;
       // The speak button no longer depends on the API having an audio file.
       // It usually doesn't: as of 2026-08-11 most of dictionaryapi.dev's
       // pronunciation MP3s return a persistent 502, and plenty of words
       // (e.g. "lucid") never had one. The browser's own speech synthesis
       // can say any word, offline and for free, so it backs up a failed
       // file and stands in when there was never a file to begin with.
-      const canSpeak = w.word && !w.notFound && (w.audio || canSpeakNow());
+      const canSpeak = w.word && !w.notFound && !w.loading && (w.audio || canSpeakNow());
       const pronunciation = `${
         w.phonetic ? `<span class="phon">${escapeHtml(w.phonetic)}</span>` : ""
       }${
@@ -3250,7 +3439,7 @@
         </div>` : "";
 
       out.innerHTML = `
-        <article class="card">
+        <article class="card${fresh ? "" : " card--static"}">
           <div class="headword">${escapeHtml(w.word)}</div>
           ${pronunciation}
           ${toggle}
@@ -3345,6 +3534,10 @@
     // real alternatives) gets a plain "Save to list" button; several senses
     // get the pick-one-to-save list, grouped by part of speech.
     function renderDictionaryBody(w) {
+      // The shell lookup() puts up before asking anyone. #lookup-status is the
+      // element the slow-lookup notice rewrites in place.
+      if (w.loading) return `<p class="status" id="lookup-status">Looking up “${escapeHtml(w.word)}”…</p>`;
+
       // notFoundMessage is already escaped where it's built in lookup() —
       // not re-escaped here, since it's assembled HTML (the "AI tab" hint),
       // not raw user input.
@@ -5556,6 +5749,8 @@
       recordLookupOutcome("library_pick");
       $("word").focus();
       $("book").value = title;
+      // Load-bearing: this is what shows the clear cross after a library pick,
+      // since assigning .value fires no input event of its own.
       $("book").dispatchEvent(new Event("input"));
       closeLibrarySection();
     }
@@ -5602,6 +5797,8 @@
       if (title === "__add__") { openLibrarySection(); return; }
       recordLookupOutcome("library_pick");
       $("book").value = title;
+      // Load-bearing: this is what shows the clear cross after a library pick,
+      // since assigning .value fires no input event of its own.
       $("book").dispatchEvent(new Event("input"));
     });
     $("library-section").addEventListener("click", (e) => {
@@ -5624,12 +5821,27 @@
       if (deleteBtn) { deleteLibraryBookRow(deleteBtn.dataset.bookId); return; }
     });
 
-    // ---------- clear button ----------
+    // ---------- clear buttons ----------
     // Shows only once there's text to clear; voice input also triggers it (see above).
     function updateClearButton() {
       $("clear-word").hidden = !$("word").value;
     }
     updateClearButton();
+
+    // The same for "Reading". Unlike the word field's cross this one does NOT
+    // reset the card -- clearing which book you're in has nothing to do with
+    // the word on screen, and wiping a definition someone is reading because
+    // they corrected the book would be its own small bug.
+    function updateBookClearButton() {
+      $("clear-book").hidden = !$("book").value;
+    }
+    updateBookClearButton();
+    $("book").addEventListener("input", updateBookClearButton);
+    $("clear-book").addEventListener("click", () => {
+      $("book").value = "";
+      updateBookClearButton();
+      $("book").focus();
+    });
 
     // ---------- events ----------
     // Auto-search: fires ~500ms after the last keystroke, so most words get
@@ -6121,7 +6333,10 @@
       // make the success rate below meaningless.
       // backup_ok is excluded for the same reason retried is: it describes a
       // lookup already counted under ok, not an extra lookup.
-      const total = (b) => n(b,"ok") + n(b,"not_found") + n(b,"server_error") + n(b,"network_error") + n(b,"offline");
+      // dict_timeout IS a lookup, and a failed one, so it belongs in the total
+      // alongside the other failure buckets -- unlike retried/backup_ok, which
+      // describe lookups already counted elsewhere.
+      const total = (b) => n(b,"ok") + n(b,"not_found") + n(b,"server_error") + n(b,"network_error") + n(b,"offline") + n(b,"dict_timeout");
 
       const today = byDay.get(days[0]) || { counts: {}, people: new Set() };
       const todayTotal = total(today);
@@ -6130,7 +6345,7 @@
       // -- but it means the primary's trouble is invisible unless the rescues
       // themselves are what's reported. This card exists to see through that.
       const rescued = n(today,"retried") + n(today,"backup_ok");
-      const theirFault = n(today,"server_error") + rescued;
+      const theirFault = n(today,"server_error") + n(today,"dict_timeout") + rescued;
       const verdict = !todayTotal
         ? "Nothing looked up yet today."
         : theirFault === 0
@@ -6142,6 +6357,15 @@
       // thing that would actually demand action -- was invisible. It is a
       // sentence rather than a column because it is only ever news when it is
       // non-zero.
+      // Added 2026-08-27, and it is the line that would have shortened that
+      // day's diagnosis from a session to a glance. A timed-out source is
+      // always their fault and never the reader's -- before this counter
+      // existed it landed in network_error, indistinguishable from dead wifi.
+      const timedOut = n(today,"dict_timeout");
+      const timeoutLine = timedOut
+        ? `<p class="stats-sub"><span class="stats-flag">${timedOut} lookup${timedOut === 1 ? "" : "s"} timed out today</span> — a dictionary was too slow to answer, not unreachable. That is their end, never the reader's connection.</p>`
+        : "";
+
       const backupBad = n(today,"backup_failed");
       const backupLine = backupBad
         ? `<p class="stats-sub"><span class="stats-flag">The second dictionary failed ${backupBad} time${backupBad === 1 ? "" : "s"} today</span> — when both are down a lookup has nowhere left to go.</p>`
@@ -6178,6 +6402,7 @@
           <p class="admin-lede">How the outbound calls are actually going, across everyone. Counts only — never the words themselves.</p>
           <p class="stats-verdict">${verdict}</p>
           <p class="stats-sub">${audioLine}</p>
+          ${timeoutLine}
           ${backupLine}
           <p class="stats-sub">${featureLine}</p>
           <div class="stats-scroll">
@@ -6185,7 +6410,7 @@
               <thead>
                 <tr>
                   <th>Day</th><th>People</th><th>Lookups</th><th>Found</th><th>Not found</th>
-                  <th>Retried</th><th>Backup</th><th>Backup failed</th><th>5xx</th><th>No network</th>
+                  <th>Retried</th><th>Backup</th><th>Backup failed</th><th>5xx</th><th>Timed out</th><th>No network</th>
                   <th>AI fetched</th><th>AI read</th><th>Voice</th><th>Scans</th>
                   <th>Audio ok</th><th>Audio fell back</th>
                 </tr>
@@ -6203,6 +6428,7 @@
                     ${cell(n(b,"backup_ok"), n(b,"backup_ok") > 0)}
                     ${cell(n(b,"backup_failed"), n(b,"backup_failed") > 0)}
                     ${cell(n(b,"server_error"), n(b,"server_error") > 0)}
+                    ${cell(n(b,"dict_timeout"), n(b,"dict_timeout") > 0)}
                     ${cell(n(b,"network_error") + n(b,"offline"))}
                     ${cell(n(b,"ai_auto"))}
                     ${cell(n(b,"ai_viewed"))}
